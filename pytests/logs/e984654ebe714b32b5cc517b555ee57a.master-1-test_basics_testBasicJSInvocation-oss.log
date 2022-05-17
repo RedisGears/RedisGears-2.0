@@ -1,0 +1,12 @@
+306242:C 17 May 2022 15:59:12.761 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+306242:C 17 May 2022 15:59:12.761 # Redis version=6.2.7, bits=64, commit=00000000, modified=0, pid=306242, just started
+306242:C 17 May 2022 15:59:12.761 # Configuration loaded
+306242:M 17 May 2022 15:59:12.762 * Increased maximum number of open files to 10032 (it was originally set to 8192).
+306242:M 17 May 2022 15:59:12.762 * monotonic clock: POSIX clock_gettime
+306242:M 17 May 2022 15:59:12.762 # A key '__redis__compare_helper' was added to Lua globals which is not on the globals allow list nor listed on the deny list.
+306242:M 17 May 2022 15:59:12.762 * Running mode=standalone, port=6379.
+306242:M 17 May 2022 15:59:12.762 # Server initialized
+306242:M 17 May 2022 15:59:12.762 # WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+306242:M 17 May 2022 15:59:12.762 # <redisgears_2> Path to libredisgears_v8_plugin.so must be specified
+306242:M 17 May 2022 15:59:12.762 # Module /home/meir/work/RedisGears-2.0/target/debug/libredisgears.so initialization failed. Module not loaded
+306242:M 17 May 2022 15:59:12.762 # Can't load module from /home/meir/work/RedisGears-2.0/target/debug/libredisgears.so: server aborting

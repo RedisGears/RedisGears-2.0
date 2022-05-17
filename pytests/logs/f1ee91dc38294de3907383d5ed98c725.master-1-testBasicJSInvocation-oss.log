@@ -1,0 +1,18 @@
+312412:C 17 May 2022 16:50:45.897 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+312412:C 17 May 2022 16:50:45.897 # Redis version=6.2.7, bits=64, commit=00000000, modified=0, pid=312412, just started
+312412:C 17 May 2022 16:50:45.897 # Configuration loaded
+312412:M 17 May 2022 16:50:45.898 * Increased maximum number of open files to 10032 (it was originally set to 8192).
+312412:M 17 May 2022 16:50:45.898 * monotonic clock: POSIX clock_gettime
+312412:M 17 May 2022 16:50:45.898 # A key '__redis__compare_helper' was added to Lua globals which is not on the globals allow list nor listed on the deny list.
+312412:M 17 May 2022 16:50:45.898 * Running mode=standalone, port=6379.
+312412:M 17 May 2022 16:50:45.898 # Server initialized
+312412:M 17 May 2022 16:50:45.898 # WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+312412:M 17 May 2022 16:50:45.900 * <redisgears_2> registering backend: js
+312412:M 17 May 2022 16:50:45.900 * Module 'redisgears_2' loaded from /home/meir/work/RedisGears-2.0/target/debug/libredisgears.so
+312412:M 17 May 2022 16:50:45.900 * Ready to accept connections
+312412:M 17 May 2022 16:50:46.017 * DB saved on disk
+312412:signal-handler (1652795446) Received SIGTERM scheduling shutdown...
+312412:M 17 May 2022 16:50:46.103 # User requested shutdown...
+312412:M 17 May 2022 16:50:46.103 * Saving the final RDB snapshot before exiting.
+312412:M 17 May 2022 16:50:46.105 * DB saved on disk
+312412:M 17 May 2022 16:50:46.105 # Redis is now ready to exit, bye bye...
