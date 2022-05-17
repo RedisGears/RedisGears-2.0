@@ -16,7 +16,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: install rltest
+      run: pip install RLTest
     - name: format
       run: cargo fmt -- --check
     - name: Build
       run: cargo build --verbose
+    - name: Tests
+      run: cd pytests;./run_tests.sh
