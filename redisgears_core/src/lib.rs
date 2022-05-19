@@ -5,40 +5,41 @@ use threadpool::ThreadPool;
 use redis_module::raw::RedisModule_GetDetachedThreadSafeContext;
 
 use redis_module::{
-    context::thread_safe::ContextGuard, redis_command, redis_module, BlockedClient, Context,
-    InfoContext, NextArg, RedisError, RedisResult, RedisString, RedisValue, Status,
-    ThreadSafeContext,
+    context::keys_cursor::KeysCursor, context::server_events::FlushSubevent,
+    context::server_events::LoadingSubevent, context::server_events::ServerEventData,
+    context::server_events::ServerRole, raw::KeyType::Stream, redis_command, redis_event_handler,
+    redis_module, Context, InfoContext, NextArg, NotifyEvent, RedisError, RedisResult, RedisString,
+    RedisValue, Status, ThreadSafeContext,
 };
 
 use redisgears_plugin_api::redisgears_plugin_api::{
-    backend_ctx::BackendCtx, function_ctx::FunctionCtx, load_library_ctx::LibraryCtx,
-    load_library_ctx::LoadLibraryCtx, run_function_ctx::BackgroundRunFunctionCtx,
-    run_function_ctx::BackgroundRunScopeGuard, run_function_ctx::RunFunctionCtx, CallResult,
-    GearsApiError,
+    backend_ctx::BackendCtxInterface, function_ctx::FunctionCtxInterface,
+    load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface,
+    stream_ctx::StreamCtxInterface, CallResult, GearsApiError,
 };
+
+use crate::run_ctx::RunCtx;
 
 use libloading::{Library, Symbol};
 
 use std::collections::HashMap;
 
+use std::sync::Arc;
+
+use crate::stream_reader::{ConsumerData, RefCellWrapper, StreamReaderCtx};
 use std::iter::Skip;
-use std::slice::Iter;
 use std::vec::IntoIter;
 
-struct BackgroundRunScopeGuardCtx<'a> {
-    _ctx_guard: ContextGuard,
-    ctx: &'a Context,
-}
+use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
 
-struct BackgroundRunCtx {
-    thread_ctx: ThreadSafeContext<BlockedClient>,
-    ctx: Context,
-}
+use rdb::REDIS_GEARS_TYPE;
 
-struct RunCtx<'a> {
-    ctx: &'a Context,
-    iter: Iter<'a, redis_module::RedisString>,
-}
+mod background_run_ctx;
+mod background_run_scope_guard;
+mod rdb;
+mod run_ctx;
+mod stream_reader;
+mod stream_run_ctx;
 
 struct GearsLibraryMataData {
     name: String,
@@ -47,13 +48,17 @@ struct GearsLibraryMataData {
 }
 
 struct GearsLibraryCtx {
-    functions: HashMap<String, Box<dyn FunctionCtx>>,
+    meta_data: GearsLibraryMataData,
+    functions: HashMap<String, Box<dyn FunctionCtxInterface>>,
+    stream_consumers:
+        HashMap<String, Arc<RefCellWrapper<ConsumerData<GearsStreamRecord, GearsStreamConsumer>>>>,
+    revert_stream_consumers: Vec<(String, GearsStreamConsumer)>,
+    old_lib: Option<Box<GearsLibrary>>,
 }
 
 struct GearsLibrary {
-    meta_data: GearsLibraryMataData,
     gears_lib_ctx: GearsLibraryCtx,
-    lib_ctx: Box<dyn LibraryCtx>,
+    lib_ctx: Box<dyn LibraryCtxInterface>,
 }
 
 fn redis_value_to_call_reply(r: RedisValue) -> CallResult {
@@ -75,126 +80,11 @@ fn redis_value_to_call_reply(r: RedisValue) -> CallResult {
     }
 }
 
-impl<'a> BackgroundRunScopeGuard for BackgroundRunScopeGuardCtx<'a> {
-    fn call(&self, command: &str, args: &[&str]) -> CallResult {
-        let res = self.ctx.call(command, args);
-        match res {
-            Ok(r) => redis_value_to_call_reply(r),
-            Err(e) => match e {
-                RedisError::Str(s) => CallResult::Error(s.to_string()),
-                RedisError::String(s) => CallResult::Error(s),
-                RedisError::WrongArity => CallResult::Error("Wrong arity".to_string()),
-                RedisError::WrongType => CallResult::Error("Wrong type".to_string()),
-            },
-        }
-    }
-}
-
-unsafe impl Send for BackgroundRunCtx {}
-
-impl BackgroundRunFunctionCtx for BackgroundRunCtx {
-    fn log(&self, msg: &str) {
-        get_ctx().log_notice(msg);
-    }
-
-    fn lock<'a>(&'a self) -> Box<dyn BackgroundRunScopeGuard + 'a> {
-        Box::new(BackgroundRunScopeGuardCtx {
-            _ctx_guard: self.thread_ctx.lock(),
-            ctx: &self.ctx,
-        })
-    }
-
-    fn reply_with_simple_string(&self, val: &str) {
-        self.ctx.reply_simple_string(val);
-    }
-
-    fn reply_with_error(&self, val: &str) {
-        self.ctx.reply_error_string(val);
-    }
-
-    fn reply_with_long(&self, val: i64) {
-        self.ctx.reply_long(val);
-    }
-
-    fn reply_with_double(&self, val: f64) {
-        self.ctx.reply_double(val);
-    }
-
-    fn reply_with_bulk_string(&self, val: &str) {
-        self.ctx.reply_bulk_string(val);
-    }
-
-    fn reply_with_array(&self, size: usize) {
-        self.ctx.reply_array(size);
-    }
-}
-
-impl<'a> RunFunctionCtx for RunCtx<'a> {
-    fn next_arg(&mut self) -> Option<&[u8]> {
-        Some(self.iter.next()?.as_slice())
-    }
-
-    fn log(&self, msg: &str) {
-        get_ctx().log_notice(msg);
-    }
-
-    fn call(&self, command: &str, args: &[&str]) -> CallResult {
-        let redis_ctx = get_ctx();
-        let res = redis_ctx.call(command, args);
-        match res {
-            Ok(r) => redis_value_to_call_reply(r),
-            Err(e) => match e {
-                RedisError::Str(s) => CallResult::Error(s.to_string()),
-                RedisError::String(s) => CallResult::Error(s),
-                RedisError::WrongArity => CallResult::Error("Wrong arity".to_string()),
-                RedisError::WrongType => CallResult::Error("Wrong type".to_string()),
-            },
-        }
-    }
-
-    fn reply_with_simple_string(&self, val: &str) {
-        self.ctx.reply_simple_string(val);
-    }
-
-    fn reply_with_error(&self, val: &str) {
-        self.ctx.reply_error_string(val);
-    }
-
-    fn reply_with_long(&self, val: i64) {
-        self.ctx.reply_long(val);
-    }
-
-    fn reply_with_double(&self, val: f64) {
-        self.ctx.reply_double(val);
-    }
-
-    fn reply_with_bulk_string(&self, val: &str) {
-        self.ctx.reply_bulk_string(val);
-    }
-
-    fn reply_with_array(&self, size: usize) {
-        self.ctx.reply_array(size);
-    }
-
-    fn go_to_backgrond(&self, func: Box<dyn FnOnce(Box<dyn BackgroundRunFunctionCtx>) + Send>) {
-        let blocked_client = self.ctx.block_client();
-        let thread_ctx = ThreadSafeContext::with_blocked_client(blocked_client);
-        let ctx = thread_ctx.get_ctx();
-        let background_run_ctx = Box::new(BackgroundRunCtx {
-            thread_ctx: thread_ctx,
-            ctx: ctx,
-        });
-        get_thread_pool().execute(move || {
-            func(background_run_ctx);
-        });
-    }
-}
-
-impl LoadLibraryCtx for GearsLibraryCtx {
+impl LoadLibraryCtxInterface for GearsLibraryCtx {
     fn register_function(
         &mut self,
         name: &str,
-        function_ctx: Box<dyn FunctionCtx>,
+        function_ctx: Box<dyn FunctionCtxInterface>,
     ) -> Result<(), GearsApiError> {
         if self.functions.contains_key(name) {
             return Err(GearsApiError::Msg(format!(
@@ -206,6 +96,66 @@ impl LoadLibraryCtx for GearsLibraryCtx {
         Ok(())
     }
 
+    fn register_stream_consumer(
+        &mut self,
+        name: &str,
+        prefix: &str,
+        ctx: Box<dyn StreamCtxInterface>,
+        window: usize,
+        trim: bool,
+    ) -> Result<(), GearsApiError> {
+        if self.stream_consumers.contains_key(name) {
+            return Err(GearsApiError::Msg(
+                "Stream registration already exists".to_string(),
+            ));
+        }
+
+        let stream_registration = if let Some(old_consumer) = self
+            .old_lib
+            .as_ref()
+            .map_or(None, |v| v.gears_lib_ctx.stream_consumers.get(name))
+        {
+            let mut o_c = old_consumer.ref_cell.borrow_mut();
+            let old_ctx = o_c.set_consumer(GearsStreamConsumer { ctx });
+            self.revert_stream_consumers
+                .push((name.to_string(), old_ctx));
+            Arc::clone(old_consumer)
+        } else {
+            let globals = get_globals_mut();
+            let stream_ctx = &mut globals.stream_ctx;
+            let lib_name = self.meta_data.name.clone();
+            let consumer_name = name.to_string();
+            let consumer = stream_ctx.add_consumer(
+                prefix,
+                GearsStreamConsumer { ctx },
+                window,
+                trim,
+                Some(Box::new(move |stream_name, ms, seq| {
+                    redis_module::replicate(
+                        get_ctx().ctx,
+                        "_rg_internals.update_stream_last_read_id",
+                        &[
+                            &lib_name,
+                            &consumer_name,
+                            stream_name,
+                            &ms.to_string(),
+                            &seq.to_string(),
+                        ],
+                    );
+                })),
+            );
+            if get_ctx().is_primary() {
+                // trigger a key scan
+                scan_key_space_for_streams();
+            }
+            consumer
+        };
+
+        self.stream_consumers
+            .insert(name.to_string(), stream_registration);
+        Ok(())
+    }
+
     fn log(&self, msg: &str) {
         get_ctx().log_notice(msg);
     }
@@ -213,10 +163,12 @@ impl LoadLibraryCtx for GearsLibraryCtx {
 
 struct GlobalCtx {
     libraries: HashMap<String, GearsLibrary>,
-    backends: HashMap<String, Box<dyn BackendCtx>>,
+    backends: HashMap<String, Box<dyn BackendCtxInterface>>,
     redis_ctx: Context,
     plugins: Vec<Library>,
     pool: ThreadPool,
+    mgmt_pool: ThreadPool,
+    stream_ctx: StreamReaderCtx<GearsStreamRecord, GearsStreamConsumer>,
 }
 
 static mut GLOBALS: Option<GlobalCtx> = None;
@@ -229,16 +181,12 @@ fn get_globals_mut() -> &'static mut GlobalCtx {
     unsafe { GLOBALS.as_mut().unwrap() }
 }
 
-fn get_ctx() -> &'static Context {
+pub fn get_ctx() -> &'static Context {
     &get_globals().redis_ctx
 }
 
-fn get_backends() -> &'static HashMap<String, Box<dyn BackendCtx>> {
+fn get_backends() -> &'static HashMap<String, Box<dyn BackendCtxInterface>> {
     &get_globals().backends
-}
-
-fn get_backends_mut() -> &'static mut HashMap<String, Box<dyn BackendCtx>> {
-    &mut get_globals_mut().backends
 }
 
 fn get_libraries() -> &'static HashMap<String, GearsLibrary> {
@@ -249,11 +197,12 @@ fn get_libraries_mut() -> &'static mut HashMap<String, GearsLibrary> {
     &mut get_globals_mut().libraries
 }
 
-fn get_thread_pool() -> &'static ThreadPool {
+pub(crate) fn get_thread_pool() -> &'static ThreadPool {
     &get_globals().pool
 }
 
 fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
+    let mgmt_pool = ThreadPool::new(1);
     unsafe {
         let inner_ctx = RedisModule_GetDetachedThreadSafeContext.unwrap()(ctx.ctx);
         let mut global_ctx = GlobalCtx {
@@ -262,6 +211,46 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
             backends: HashMap::new(),
             plugins: Vec::new(),
             pool: ThreadPool::new(1),
+            mgmt_pool: mgmt_pool,
+            stream_ctx: StreamReaderCtx::new(
+                Box::new(|key, id, include_id| {
+                    // read data from the stream
+                    let ctx = get_ctx();
+                    let stream_name = ctx.create_string(key);
+                    let key = ctx.open_key(&stream_name);
+                    let mut stream_iterator =
+                        match key.get_stream_range_iterator(id, None, !include_id) {
+                            Ok(s) => s,
+                            Err(_) => {
+                                return Err("Key does not exists on is not a stream".to_string())
+                            }
+                        };
+
+                    Ok(match stream_iterator.next() {
+                        Some(e) => Some(GearsStreamRecord { record: e }),
+                        None => None,
+                    })
+                }),
+                Box::new(|key_name, id| {
+                    // trim the stream callback
+                    let ctx = get_ctx();
+                    let stream_name = ctx.create_string(key_name);
+                    let key = ctx.open_key_writable(&stream_name);
+                    let res = key.trim_stream_by_id(id, false);
+                    if let Err(e) = res {
+                        ctx.log_debug(&format!(
+                            "Error occured when trimming stream (stream was probably deleted): {}",
+                            e
+                        ))
+                    } else {
+                        redis_module::replicate(
+                            ctx.ctx,
+                            "xtrim",
+                            &[key_name, "MINID", &format!("{}-{}", id.ms, id.seq)],
+                        );
+                    }
+                }),
+            ),
         };
 
         let v8_path = match args.into_iter().next() {
@@ -281,7 +270,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
         };
         let lib = Library::new(v8_path).unwrap();
         {
-            let func: Symbol<unsafe fn() -> *mut dyn BackendCtx> =
+            let func: Symbol<unsafe fn() -> *mut dyn BackendCtxInterface> =
                 lib.get(b"initialize_plugin").unwrap();
             let backend = Box::from_raw(func());
             let name = backend.get_name();
@@ -390,7 +379,7 @@ fn library_extract_matadata(code: &str) -> Result<GearsLibraryMataData, RedisErr
 }
 
 fn function_del_command(
-    _ctx: &Context,
+    ctx: &Context,
     mut args: Skip<IntoIter<redis_module::RedisString>>,
 ) -> RedisResult {
     let name = args
@@ -400,7 +389,10 @@ fn function_del_command(
         })?;
     let libraries = get_libraries_mut();
     match libraries.remove(name) {
-        Some(_) => Ok(RedisValue::SimpleStringStatic("OK")),
+        Some(_) => {
+            ctx.replicate_verbatim();
+            Ok(RedisValue::SimpleStringStatic("OK"))
+        }
         None => Err(RedisError::Str("library does not exists")),
     }
 }
@@ -411,6 +403,7 @@ fn function_list_command(
 ) -> RedisResult {
     let mut with_code = false;
     let mut lib = None;
+    let mut verbosity = 0;
     loop {
         let arg = args.next_arg();
         if arg.is_err() {
@@ -424,6 +417,10 @@ fn function_list_command(
         let arg_str = arg_str.to_lowercase();
         match arg_str.as_ref() {
             "withcode" => with_code = true,
+            "verbose" => verbosity = verbosity + 1,
+            "v" => verbosity = verbosity + 1,
+            "vv" => verbosity = verbosity + 2,
+            "vvv" => verbosity = verbosity + 3,
             "library" => {
                 let lib_name = match args.next_arg() {
                     Ok(n) => match n.try_as_str() {
@@ -443,7 +440,7 @@ fn function_list_command(
             .values()
             .filter(|l| match lib {
                 Some(lib_name) => {
-                    if l.meta_data.name == lib_name {
+                    if l.gears_lib_ctx.meta_data.name == lib_name {
                         true
                     } else {
                         false
@@ -454,9 +451,9 @@ fn function_list_command(
             .map(|l| {
                 let mut res = vec![
                     RedisValue::BulkString("engine".to_string()),
-                    RedisValue::BulkString(l.meta_data.engine.to_string()),
+                    RedisValue::BulkString(l.gears_lib_ctx.meta_data.engine.to_string()),
                     RedisValue::BulkString("name".to_string()),
-                    RedisValue::BulkString(l.meta_data.name.to_string()),
+                    RedisValue::BulkString(l.gears_lib_ctx.meta_data.name.to_string()),
                     RedisValue::BulkString("functions".to_string()),
                     RedisValue::Array(
                         l.gears_lib_ctx
@@ -465,10 +462,137 @@ fn function_list_command(
                             .map(|k| RedisValue::BulkString(k.to_string()))
                             .collect::<Vec<RedisValue>>(),
                     ),
+                    RedisValue::BulkString("stream_registrations".to_string()),
+                    RedisValue::Array(
+                        l.gears_lib_ctx
+                            .stream_consumers
+                            .iter()
+                            .map(|(k, v)| {
+                                let v = v.ref_cell.borrow();
+                                if verbosity > 0 {
+                                    let mut res = vec![
+                                        RedisValue::BulkString("name".to_string()),
+                                        RedisValue::BulkString(k.to_string()),
+                                        RedisValue::BulkString("prefix".to_string()),
+                                        RedisValue::BulkString(v.prefix.to_string()),
+                                        RedisValue::BulkString("window".to_string()),
+                                        RedisValue::Integer(v.window as i64),
+                                        RedisValue::BulkString("trim".to_string()),
+                                        RedisValue::BulkString(
+                                            (if v.trim { "enabled" } else { "disabled" })
+                                                .to_string(),
+                                        ),
+                                        RedisValue::BulkString("num_streams".to_string()),
+                                        RedisValue::Integer(v.consumed_streams.len() as i64),
+                                    ];
+                                    if verbosity > 1 {
+                                        res.push(RedisValue::BulkString("streams".to_string()));
+                                        res.push(RedisValue::Array(
+                                            v.consumed_streams
+                                                .iter()
+                                                .map(|(s, v)| {
+                                                    let v = v.ref_cell.borrow();
+                                                    let mut res = Vec::new();
+                                                    res.push(RedisValue::BulkString(
+                                                        "name".to_string(),
+                                                    ));
+                                                    res.push(RedisValue::BulkString(s.to_string()));
+
+                                                    res.push(RedisValue::BulkString(
+                                                        "last_processed_time".to_string(),
+                                                    ));
+                                                    res.push(RedisValue::Integer(
+                                                        v.last_processed_time as i64,
+                                                    ));
+
+                                                    res.push(RedisValue::BulkString(
+                                                        "avg_processed_time".to_string(),
+                                                    ));
+                                                    res.push(RedisValue::Float(
+                                                        v.total_processed_time as f64
+                                                            / v.records_processed as f64,
+                                                    ));
+
+                                                    res.push(RedisValue::BulkString(
+                                                        "last_lag".to_string(),
+                                                    ));
+                                                    res.push(RedisValue::Integer(
+                                                        v.last_lag as i64,
+                                                    ));
+
+                                                    res.push(RedisValue::BulkString(
+                                                        "avg_lag".to_string(),
+                                                    ));
+                                                    res.push(RedisValue::Float(
+                                                        v.total_lag as f64
+                                                            / v.records_processed as f64,
+                                                    ));
+
+                                                    res.push(RedisValue::BulkString(
+                                                        "total_record_processed".to_string(),
+                                                    ));
+                                                    res.push(RedisValue::Integer(
+                                                        v.records_processed as i64,
+                                                    ));
+
+                                                    res.push(RedisValue::BulkString(
+                                                        "id_to_read_from".to_string(),
+                                                    ));
+                                                    match v.last_read_id {
+                                                        Some(id) => {
+                                                            res.push(RedisValue::BulkString(
+                                                                format!("{}-{}", id.ms, id.seq),
+                                                            ))
+                                                        }
+                                                        None => res.push(RedisValue::BulkString(
+                                                            "None".to_string(),
+                                                        )),
+                                                    }
+                                                    res.push(RedisValue::BulkString(
+                                                        "last_error".to_string(),
+                                                    ));
+                                                    match &v.last_error {
+                                                        Some(err) => res.push(
+                                                            RedisValue::BulkString(err.to_string()),
+                                                        ),
+                                                        None => res.push(RedisValue::BulkString(
+                                                            "None".to_string(),
+                                                        )),
+                                                    }
+                                                    if verbosity > 2 {
+                                                        res.push(RedisValue::BulkString(
+                                                            "pending_ids".to_string(),
+                                                        ));
+                                                        let pending_ids = v
+                                                            .pending_ids
+                                                            .iter()
+                                                            .map(|e| {
+                                                                RedisValue::BulkString(format!(
+                                                                    "{}-{}",
+                                                                    e.ms, e.seq
+                                                                ))
+                                                            })
+                                                            .collect::<Vec<RedisValue>>();
+                                                        res.push(RedisValue::Array(pending_ids));
+                                                    }
+                                                    RedisValue::Array(res)
+                                                })
+                                                .collect::<Vec<RedisValue>>(),
+                                        ));
+                                    }
+                                    RedisValue::Array(res)
+                                } else {
+                                    RedisValue::BulkString(k.to_string())
+                                }
+                            })
+                            .collect::<Vec<RedisValue>>(),
+                    ),
                 ];
                 if with_code {
                     res.push(RedisValue::BulkString("code".to_string()));
-                    res.push(RedisValue::BulkString(l.meta_data.code.to_string()));
+                    res.push(RedisValue::BulkString(
+                        l.gears_lib_ctx.meta_data.code.to_string(),
+                    ));
                 }
                 RedisValue::Array(res)
             })
@@ -476,8 +600,88 @@ fn function_list_command(
     ))
 }
 
+pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult {
+    let meta_data = library_extract_matadata(code)?;
+    let backend_name = meta_data.engine.as_str();
+    let backend = get_backends().get(backend_name);
+    if backend.is_none() {
+        return Err(RedisError::String(format!(
+            "Unknown backend {}",
+            backend_name
+        )));
+    }
+    let backend = backend.unwrap();
+    let lib_ctx = backend.compile_library(code);
+    let lib_ctx = match lib_ctx {
+        Err(e) => match e {
+            GearsApiError::Msg(s) => {
+                return Err(RedisError::String(format!(
+                    "Failed library compilation {}",
+                    s
+                )))
+            }
+        },
+        Ok(lib_ctx) => lib_ctx,
+    };
+    let libraries = get_libraries_mut();
+    let old_lib = libraries.remove(&meta_data.name);
+    if old_lib.is_some() && !upgrade {
+        let err = Err(RedisError::String(format!(
+            "Library {} already exists",
+            &meta_data.name
+        )));
+        libraries.insert(meta_data.name, old_lib.unwrap());
+        return err;
+    }
+    let mut gears_library = GearsLibraryCtx {
+        meta_data: meta_data,
+        functions: HashMap::new(),
+        stream_consumers: HashMap::new(),
+        revert_stream_consumers: Vec::new(),
+        old_lib: old_lib.map_or(None, |v| Some(Box::new(v))),
+    };
+    let res = lib_ctx.load_library(&mut gears_library);
+    if let Err(err) = res {
+        let ret = match err {
+            GearsApiError::Msg(s) => {
+                let msg = format!("Failed loading library, {}", s);
+                Err(RedisError::String(msg))
+            }
+        };
+        if let Some(old_lib) = gears_library.old_lib.take() {
+            for (name, old_ctx) in gears_library.revert_stream_consumers {
+                let stream_data = gears_library.stream_consumers.get(&name).unwrap();
+                let mut s_d = stream_data.ref_cell.borrow_mut();
+                s_d.set_consumer(old_ctx);
+            }
+            libraries.insert(gears_library.meta_data.name, *old_lib);
+        }
+        return ret;
+    }
+    if gears_library.functions.len() == 0 {
+        if let Some(old_lib) = gears_library.old_lib.take() {
+            for (name, old_ctx) in gears_library.revert_stream_consumers {
+                let stream_data = gears_library.stream_consumers.get(&name).unwrap();
+                let mut s_d = stream_data.ref_cell.borrow_mut();
+                s_d.set_consumer(old_ctx);
+            }
+            libraries.insert(gears_library.meta_data.name, *old_lib);
+        }
+        return Err(RedisError::Str("No function was registered"));
+    }
+    gears_library.old_lib = None;
+    libraries.insert(
+        gears_library.meta_data.name.to_string(),
+        GearsLibrary {
+            gears_lib_ctx: gears_library,
+            lib_ctx: lib_ctx,
+        },
+    );
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
 fn function_load_command(
-    _ctx: &Context,
+    ctx: &Context,
     mut args: Skip<IntoIter<redis_module::RedisString>>,
 ) -> RedisResult {
     let mut upgrade = false;
@@ -501,61 +705,13 @@ fn function_load_command(
         Ok(s) => s,
         Err(_) => return Err(RedisError::Str("lib code must a valid string")),
     };
-    let meta_data = library_extract_matadata(lib_code_slice)?;
-    let backend_name = meta_data.engine.as_str();
-    let backend = get_backends().get(backend_name);
-    if backend.is_none() {
-        return Err(RedisError::String(format!(
-            "Unknown backend {}",
-            backend_name
-        )));
+    match function_load_intrernal(lib_code_slice, upgrade) {
+        Ok(r) => {
+            ctx.replicate_verbatim();
+            Ok(r)
+        }
+        Err(e) => Err(e),
     }
-    let backend = backend.unwrap();
-    let lib_ctx = backend.compile_library(lib_code_slice);
-    let lib_ctx = match lib_ctx {
-        Err(e) => match e {
-            GearsApiError::Msg(s) => {
-                return Err(RedisError::String(format!(
-                    "Failed library compilation {}",
-                    s
-                )))
-            }
-        },
-        Ok(lib_ctx) => lib_ctx,
-    };
-    let libraries = get_libraries_mut();
-    let old_lib = libraries.get(&meta_data.name);
-    if old_lib.is_some() && !upgrade {
-        return Err(RedisError::String(format!(
-            "Library {} already exists",
-            &meta_data.name
-        )));
-    }
-    let mut gears_library = GearsLibraryCtx {
-        functions: HashMap::new(),
-    };
-    let res = lib_ctx.load_library(&mut gears_library);
-    if let Err(err) = res {
-        let ret = match err {
-            GearsApiError::Msg(s) => {
-                let msg = format!("Failed loading library, {}", s);
-                Err(RedisError::String(msg))
-            }
-        };
-        return ret;
-    }
-    if gears_library.functions.len() == 0 {
-        return Err(RedisError::Str("No function was registered"));
-    }
-    libraries.insert(
-        meta_data.name.to_string(),
-        GearsLibrary {
-            meta_data: meta_data,
-            gears_lib_ctx: gears_library,
-            lib_ctx: lib_ctx,
-        },
-    );
-    Ok(RedisValue::SimpleStringStatic("OK"))
 }
 
 fn function_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -573,13 +729,148 @@ fn function_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 }
 
+fn on_stream_touched(_ctx: &Context, _event_type: NotifyEvent, event: &str, key: &str) {
+    if get_ctx().is_primary() {
+        let stream_ctx = &mut get_globals_mut().stream_ctx;
+        stream_ctx.on_stream_touched(event, key);
+    }
+}
+
+fn generic_notification(_ctx: &Context, _event_type: NotifyEvent, event: &str, key: &str) {
+    if event == "del" {
+        let stream_ctx = &mut get_globals_mut().stream_ctx;
+        stream_ctx.on_stream_deleted(event, key);
+    }
+}
+
+fn update_stream_last_read_id(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let library_name = args.next_arg()?.try_as_str()?;
+    let stream_consumer = args.next_arg()?.try_as_str()?;
+    let stream = args.next_arg()?.try_as_str()?;
+    let ms = args.next_arg()?.try_as_str()?.parse::<u64>()?;
+    let seq = args.next_arg()?.try_as_str()?.parse::<u64>()?;
+    let library = get_libraries().get(library_name);
+    if library.is_none() {
+        return Err(RedisError::String(format!(
+            "No such library '{}'",
+            library_name
+        )));
+    }
+    let library = library.unwrap();
+    let consumer = library.gears_lib_ctx.stream_consumers.get(stream_consumer);
+    if consumer.is_none() {
+        return Err(RedisError::String(format!(
+            "No such consumer '{}'",
+            stream_consumer
+        )));
+    }
+    let consumer = consumer.unwrap();
+    get_globals_mut()
+        .stream_ctx
+        .update_stream_for_consumer(stream, consumer, ms, seq);
+    ctx.replicate_verbatim();
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+fn scan_key_space_for_streams() {
+    get_globals().mgmt_pool.execute(|| {
+        let cursor = KeysCursor::new();
+        let ctx = get_ctx();
+        let thread_ctx = ThreadSafeContext::new();
+        let mut _gaurd = Some(thread_ctx.lock());
+        while cursor.scan(ctx, &|ctx, key_name, key| {
+            let key_type = match key {
+                Some(k) => k.key_type(),
+                None => ctx.open_key(&key_name).key_type(),
+            };
+            if key_type == Stream {
+                let key_name_str = key_name.try_as_str();
+                match key_name_str {
+                    Ok(key) => get_globals_mut()
+                        .stream_ctx
+                        .on_stream_touched("created", key),
+                    Err(_) => {}
+                }
+            }
+        }) {
+            _gaurd = None; // will release the lock
+            _gaurd = Some(thread_ctx.lock());
+        }
+    })
+}
+
+fn on_role_changed(ctx: &Context, event_data: ServerEventData) {
+    match event_data {
+        ServerEventData::RoleChangedEvent(role_changed) => {
+            if let ServerRole::Primary = role_changed.role {
+                ctx.log_notice(
+                    "Role changed to primary, initializing key scan to search for streams.",
+                );
+                scan_key_space_for_streams();
+            }
+        }
+        _ => panic!("got unexpected sub event"),
+    }
+}
+
+fn on_loading_event(ctx: &Context, event_data: ServerEventData) {
+    match event_data {
+        ServerEventData::LoadingEvent(loading_sub_event) => {
+            match loading_sub_event {
+                LoadingSubevent::RdbStarted
+                | LoadingSubevent::AofStarted
+                | LoadingSubevent::ReplStarted => {
+                    // clean the entire functions data
+                    ctx.log_notice("Got a loading start event, clear the entire functions data.");
+                    let globals = get_globals_mut();
+                    globals.libraries.clear();
+                    globals.stream_ctx.clear();
+                }
+                _ => {}
+            }
+        }
+        _ => panic!("got unexpected sub event"),
+    }
+}
+
+fn on_flush_event(ctx: &Context, event_data: ServerEventData) {
+    match event_data {
+        ServerEventData::FlushEvent(loading_sub_event) => match loading_sub_event {
+            FlushSubevent::Started => {
+                ctx.log_notice("Got a flush started event");
+                let globals = get_globals_mut();
+                for lib in globals.libraries.values() {
+                    for consumer in lib.gears_lib_ctx.stream_consumers.values() {
+                        let mut c = consumer.ref_cell.borrow_mut();
+                        c.clear_streams_info();
+                    }
+                }
+                globals.stream_ctx.clear_tracked_streams();
+            }
+            _ => {}
+        },
+        _ => panic!("got unexpected sub event"),
+    }
+}
+
 redis_module! {
     name: "redisgears_2",
     version: 999999,
-    data_types: [],
+    data_types: [REDIS_GEARS_TYPE],
     init: js_init,
     info: js_info,
     commands: [
         ["rg.function", function_command, "readonly", 0,0,0],
+        ["_rg_internals.update_stream_last_read_id", update_stream_last_read_id, "readonly", 0,0,0],
     ],
+    event_handlers: [
+        [@STREAM: on_stream_touched],
+        [@GENERIC: generic_notification],
+    ],
+    server_events: [
+        [@RuleChanged: on_role_changed],
+        [@Loading: on_loading_event],
+        [@Flush: on_flush_event],
+    ]
 }

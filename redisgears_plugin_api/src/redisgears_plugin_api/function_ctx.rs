@@ -1,10 +1,6 @@
-use crate::redisgears_plugin_api::run_function_ctx::RunFunctionCtx;
+use crate::redisgears_plugin_api::run_function_ctx::RunFunctionCtxInterface;
+use crate::redisgears_plugin_api::FunctionCallResult;
 
-pub enum FunctionCallResult {
-    Done,
-    Hold,
-}
-
-pub trait FunctionCtx {
-    fn call(&self, run_ctx: &mut dyn RunFunctionCtx) -> FunctionCallResult;
+pub trait FunctionCtxInterface {
+    fn call(&self, run_ctx: &mut dyn RunFunctionCtxInterface) -> FunctionCallResult;
 }

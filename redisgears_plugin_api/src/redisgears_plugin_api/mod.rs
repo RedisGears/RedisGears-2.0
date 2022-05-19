@@ -2,6 +2,7 @@ pub mod backend_ctx;
 pub mod function_ctx;
 pub mod load_library_ctx;
 pub mod run_function_ctx;
+pub mod stream_ctx;
 
 pub enum GearsApiError {
     Msg(String),
@@ -13,6 +14,11 @@ impl GearsApiError {
             GearsApiError::Msg(s) => &s,
         }
     }
+}
+
+pub enum FunctionCallResult {
+    Done,
+    Hold,
 }
 
 pub enum CallResult {

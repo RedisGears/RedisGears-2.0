@@ -1,5 +1,5 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    load_library_ctx::LibraryCtx, load_library_ctx::LoadLibraryCtx, GearsApiError,
+    load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface, GearsApiError,
 };
 
 use v8_rs::v8::{
@@ -31,8 +31,11 @@ impl V8ScriptCtx {
     }
 }
 
-impl LibraryCtx for V8ScriptCtx {
-    fn load_library(&self, load_library_ctx: &mut dyn LoadLibraryCtx) -> Result<(), GearsApiError> {
+impl LibraryCtxInterface for V8ScriptCtx {
+    fn load_library(
+        &self,
+        load_library_ctx: &mut dyn LoadLibraryCtxInterface,
+    ) -> Result<(), GearsApiError> {
         let _isolate_scope = self.isolate.enter();
         let _handlers_scope = self.isolate.new_handlers_scope();
         let ctx_scope = self.ctx.enter();

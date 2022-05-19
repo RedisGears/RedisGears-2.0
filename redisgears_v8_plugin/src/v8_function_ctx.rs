@@ -1,5 +1,6 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    function_ctx::FunctionCallResult, function_ctx::FunctionCtx, run_function_ctx::RunFunctionCtx,
+    function_ctx::FunctionCtxInterface, run_function_ctx::RunFunctionCtxInterface,
+    FunctionCallResult,
 };
 
 use v8_rs::v8::{
@@ -7,14 +8,15 @@ use v8_rs::v8::{
     v8_promise::V8PromiseState, v8_value::V8LocalValue, v8_value::V8PersistValue,
 };
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use crate::v8_native_functions::{BackgroundExecutionCtx, ExecutionCtx};
 
 pub struct V8InternalFunction {
+    persisted_function: V8PersistValue,
     ctx: Arc<V8Context>,
     isolate: Arc<V8Isolate>,
-    persisted_function: V8PersistValue,
 }
 
 use std::str;
@@ -119,18 +121,32 @@ impl V8InternalFunction {
                             execution_ctx.reply_with_error(r.as_str());
                         }
                     } else {
-                        let resolve = ctx_scope.new_native_function(|args, isolate, _context| {
-                            let reply = args.get(0);
-                            let reply = reply.to_utf8(isolate).unwrap();
-                            execution_ctx.reply_with_bulk_string(reply.as_str());
-                            None
-                        });
-                        let reject = ctx_scope.new_native_function(|args, isolate, _ctx_scope| {
-                            let reply = args.get(0);
-                            let reply = reply.to_utf8(isolate).unwrap();
-                            execution_ctx.reply_with_error(reply.as_str());
-                            None
-                        });
+                        let bg_execution_ctx =
+                            if let ExecutionCtx::BackgroundRun(bg_execution_ctx) = execution_ctx {
+                                bg_execution_ctx
+                            } else {
+                                execution_ctx.get_backgrond_ctx()
+                            };
+                        let execution_ctx_resolve = Arc::new(RefCell::new(bg_execution_ctx));
+                        let execution_ctx_reject = Arc::clone(&execution_ctx_resolve);
+                        let resolve =
+                            ctx_scope.new_native_function(move |args, isolate, _context| {
+                                let reply = args.get(0);
+                                let reply = reply.to_utf8(isolate).unwrap();
+                                let mut execution_ctx = execution_ctx_resolve.borrow_mut();
+                                execution_ctx.reply_with_bulk_string(reply.as_str());
+                                execution_ctx.unblock_client();
+                                None
+                            });
+                        let reject =
+                            ctx_scope.new_native_function(move |args, isolate, _ctx_scope| {
+                                let reply = args.get(0);
+                                let reply = reply.to_utf8(isolate).unwrap();
+                                let mut execution_ctx = execution_ctx_reject.borrow_mut();
+                                execution_ctx.reply_with_error(reply.as_str());
+                                execution_ctx.unblock_client();
+                                None
+                            });
                         res.then(&ctx_scope, &resolve, &reject);
                         return FunctionCallResult::Hold;
                     }
@@ -170,8 +186,8 @@ impl V8Function {
     }
 }
 
-impl FunctionCtx for V8Function {
-    fn call(&self, run_ctx: &mut dyn RunFunctionCtx) -> FunctionCallResult {
+impl FunctionCtxInterface for V8Function {
+    fn call(&self, run_ctx: &mut dyn RunFunctionCtxInterface) -> FunctionCallResult {
         if self.is_async {
             let inner_function = Arc::clone(&self.inner_function);
             // if we are going to the background we must consume all the arguments
@@ -186,9 +202,10 @@ impl FunctionCtx for V8Function {
                 };
                 args.push(arg.to_string());
             }
-            run_ctx.go_to_backgrond(Box::new(move |run_ctx| {
+            let bg_ctx = run_ctx.get_background_ctx();
+            run_ctx.run_on_backgrond(Box::new(move || {
                 let execution_ctx = ExecutionCtx::BackgroundRun(BackgroundExecutionCtx {
-                    bg_execution_ctx: run_ctx.as_ref(),
+                    bg_execution_ctx: Some(bg_ctx),
                     args: args,
                 });
                 inner_function.call(execution_ctx);

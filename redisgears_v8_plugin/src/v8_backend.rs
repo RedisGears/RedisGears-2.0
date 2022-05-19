@@ -1,5 +1,5 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    backend_ctx::BackendCtx, load_library_ctx::LibraryCtx, GearsApiError,
+    backend_ctx::BackendCtxInterface, load_library_ctx::LibraryCtxInterface, GearsApiError,
 };
 
 use crate::v8_script_ctx::V8ScriptCtx;
@@ -36,7 +36,7 @@ static mut GLOBAL: MyAllocator = MyAllocator { allocator: None };
 
 pub(crate) struct V8Backend;
 
-impl BackendCtx for V8Backend {
+impl BackendCtxInterface for V8Backend {
     fn get_name(&self) -> &'static str {
         "js"
     }
@@ -47,7 +47,7 @@ impl BackendCtx for V8Backend {
         Ok(())
     }
 
-    fn compile_library(&self, blob: &str) -> Result<Box<dyn LibraryCtx>, GearsApiError> {
+    fn compile_library(&self, blob: &str) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError> {
         let isolate = V8Isolate::new();
 
         let (script, ctx) = {

@@ -2,5 +2,10 @@ from common import gearsTest
 
 @gearsTest()
 def testBasicJSInvocation(env):
-    env.expect('RG.FUNCTION', 'LOAD', '#!js name=foo\nredis.register_function("test", function(){return 1})').equal('OK')
+    script = '''#!js name=foo
+redis.register_function("test", function(){
+    return 1
+})
+    '''
+    env.expect('RG.FUNCTION', 'LOAD', script).equal('OK')
     env.expect('RG.FUNCTION', 'CALL', 'foo', 'test').equal(1)
