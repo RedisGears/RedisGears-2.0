@@ -120,7 +120,7 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
                 return Err(GearsApiError::Msg(
                     format!("Can not upgrade an existing consumer with different prefix, consumer: '{}', old_prefix: {}, new_prefix: {}.",
                     name, o_c.prefix, prefix)
-                )); 
+                ));
             }
             let old_ctx = o_c.set_consumer(GearsStreamConsumer { ctx });
             let old_window = o_c.set_window(window);
