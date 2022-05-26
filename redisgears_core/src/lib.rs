@@ -52,7 +52,7 @@ struct GearsLibraryCtx {
     functions: HashMap<String, Box<dyn FunctionCtxInterface>>,
     stream_consumers:
         HashMap<String, Arc<RefCellWrapper<ConsumerData<GearsStreamRecord, GearsStreamConsumer>>>>,
-    revert_stream_consumers: Vec<(String, GearsStreamConsumer)>,
+    revert_stream_consumers: Vec<(String, GearsStreamConsumer, usize, bool)>,
     old_lib: Option<Box<GearsLibrary>>,
 }
 
@@ -116,9 +116,17 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             .map_or(None, |v| v.gears_lib_ctx.stream_consumers.get(name))
         {
             let mut o_c = old_consumer.ref_cell.borrow_mut();
+            if o_c.prefix != prefix {
+                return Err(GearsApiError::Msg(
+                    format!("Can not upgrade an existing consumer with different prefix, consumer: '{}', old_prefix: {}, new_prefix: {}.",
+                    name, o_c.prefix, prefix)
+                )); 
+            }
             let old_ctx = o_c.set_consumer(GearsStreamConsumer { ctx });
+            let old_window = o_c.set_window(window);
+            let old_trim = o_c.set_trim(trim);
             self.revert_stream_consumers
-                .push((name.to_string(), old_ctx));
+                .push((name.to_string(), old_ctx, old_window, old_trim));
             Arc::clone(old_consumer)
         } else {
             let globals = get_globals_mut();
@@ -649,10 +657,12 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
             }
         };
         if let Some(old_lib) = gears_library.old_lib.take() {
-            for (name, old_ctx) in gears_library.revert_stream_consumers {
+            for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
                 let stream_data = gears_library.stream_consumers.get(&name).unwrap();
                 let mut s_d = stream_data.ref_cell.borrow_mut();
                 s_d.set_consumer(old_ctx);
+                s_d.set_window(old_window);
+                s_d.set_trim(old_trim);
             }
             libraries.insert(gears_library.meta_data.name, *old_lib);
         }
@@ -660,10 +670,12 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
     }
     if gears_library.functions.len() == 0 {
         if let Some(old_lib) = gears_library.old_lib.take() {
-            for (name, old_ctx) in gears_library.revert_stream_consumers {
+            for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
                 let stream_data = gears_library.stream_consumers.get(&name).unwrap();
                 let mut s_d = stream_data.ref_cell.borrow_mut();
                 s_d.set_consumer(old_ctx);
+                s_d.set_window(old_window);
+                s_d.set_trim(old_trim);
             }
             libraries.insert(gears_library.meta_data.name, *old_lib);
         }

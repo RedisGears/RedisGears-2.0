@@ -135,6 +135,18 @@ where
         old_consumer.unwrap()
     }
 
+    pub(crate) fn set_window(&mut self, window: usize) -> usize {
+        let old_window = self.window;
+        self.window = window;
+        old_window
+    }
+
+    pub(crate) fn set_trim(&mut self, trim: bool) -> bool {
+        let old_trim = self.trim;
+        self.trim = trim;
+        old_trim
+    }
+
     pub(crate) fn get_or_create_consumed_stream(
         &mut self,
         name: &str,
