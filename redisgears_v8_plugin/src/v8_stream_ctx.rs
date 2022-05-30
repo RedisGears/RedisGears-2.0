@@ -6,9 +6,18 @@ use redisgears_plugin_api::redisgears_plugin_api::stream_ctx::{
     StreamCtxInterface, StreamProcessCtxInterface, StreamRecordAck, StreamRecordInterface,
 };
 
-use crate::v8_native_functions::ExecutionCtx;
+use redisgears_plugin_api::redisgears_plugin_api::run_function_ctx::{
+    BackgroundRunFunctionCtxInterface,
+};
+
+use crate::v8_native_functions::{
+    get_redis_client,
+    get_backgrounnd_client,
+    RedisClient,
+};
 
 use std::sync::Arc;
+use std::cell::RefCell;
 
 use std::str;
 
@@ -42,11 +51,11 @@ impl V8StreamCtx {
 }
 
 impl V8StreamCtxInternals {
-    fn process_record_internal(
+    fn process_record_internal_sync(
         &self,
         stream_name: &str,
         record: Box<dyn StreamRecordInterface>,
-        execution_ctx: ExecutionCtx,
+        run_ctx: &dyn StreamProcessCtxInterface,
     ) -> Option<StreamRecordAck> {
         let _isolate_scope = self.isolate.enter();
         let _handlers_scope = self.isolate.new_handlers_scope();
@@ -102,20 +111,102 @@ impl V8StreamCtxInternals {
             &val_v8_arr.to_value(),
         );
 
-        self.ctx.set_private_data(0, Some(&execution_ctx));
+        let c = run_ctx.get_redis_client();
+        let mut redis_client = RedisClient::new();
+        redis_client.set_client(c);
+        let redis_client = Arc::new(RefCell::new(redis_client));
+        let r_client = get_redis_client(&self.isolate, &self.ctx, &ctx_scope, &redis_client);
+        redis_client.borrow_mut().make_invalid();
         let res = self
             .persisted_function
             .as_local(self.isolate.as_ref())
-            .call(&ctx_scope, Some(&[&stream_data.to_value()]));
-        self.ctx.set_private_data::<ExecutionCtx>(0, None);
+            .call(&ctx_scope, Some(&[&r_client.to_value(), &stream_data.to_value()]));
 
         Some(match res {
             Some(_) => StreamRecordAck::Ack,
             None => {
+                // todo: handle promise
                 let error_utf8 = trycatch.get_exception().to_utf8(&self.isolate).unwrap();
                 StreamRecordAck::Nack(error_utf8.as_str().to_string())
             }
         })
+    }
+
+    fn process_record_internal_async(
+        &self,
+        stream_name: &str,
+        record: Box<dyn StreamRecordInterface>,
+        redis_client: Box<dyn BackgroundRunFunctionCtxInterface>,
+        ack_callback: Box<dyn FnOnce(StreamRecordAck) + Send>,
+    ) {
+        let _isolate_scope = self.isolate.enter();
+        let _handlers_scope = self.isolate.new_handlers_scope();
+        let ctx_scope = self.ctx.enter();
+        let trycatch = self.isolate.new_try_catch();
+
+        let id = record.get_id();
+        let id_v8_arr = self.isolate.new_array(&[
+            &self.isolate.new_long(id.0 as i64),
+            &self.isolate.new_long(id.1 as i64),
+        ]);
+        let stream_name_v8_str = self.isolate.new_string(stream_name);
+
+        let vals = record
+            .fields()
+            .map(|(f, v)| (str::from_utf8(f), str::from_utf8(v)))
+            .filter(|(f, v)| {
+                if f.is_err() || v.is_err() {
+                    false
+                } else {
+                    true
+                }
+            })
+            .map(|(f, v)| (f.unwrap(), v.unwrap()))
+            .map(|(f, v)| {
+                self.isolate
+                    .new_array(&[
+                        &self.isolate.new_string(f).to_value(),
+                        &self.isolate.new_string(v).to_value(),
+                    ])
+                    .to_value()
+            })
+            .collect::<Vec<V8LocalValue>>();
+
+        let val_v8_arr = self
+            .isolate
+            .new_array(&vals.iter().collect::<Vec<&V8LocalValue>>());
+
+        let stream_data = self.isolate.new_object();
+        stream_data.set(
+            &ctx_scope,
+            &self.isolate.new_string("id").to_value(),
+            &id_v8_arr.to_value(),
+        );
+        stream_data.set(
+            &ctx_scope,
+            &self.isolate.new_string("stream_name").to_value(),
+            &stream_name_v8_str.to_value(),
+        );
+        stream_data.set(
+            &ctx_scope,
+            &self.isolate.new_string("record").to_value(),
+            &val_v8_arr.to_value(),
+        );
+
+        let r_client = get_backgrounnd_client(&self.isolate, &self.ctx, &ctx_scope, redis_client);
+        let res = self
+            .persisted_function
+            .as_local(self.isolate.as_ref())
+            .call(&ctx_scope, Some(&[&r_client.to_value(), &stream_data.to_value()]));
+
+        match res {
+            Some(_) => ack_callback(StreamRecordAck::Ack),
+            None => {
+                // todo: hanlde promise
+                let error_utf8 = trycatch.get_exception().to_utf8(&self.isolate).unwrap();
+                ack_callback(StreamRecordAck::Nack(error_utf8.as_str().to_string()));
+            }
+        }
     }
 }
 
@@ -130,21 +221,18 @@ impl StreamCtxInterface for V8StreamCtx {
         if self.is_async {
             let internals = Arc::clone(&self.internals);
             let stream_name = stream_name.to_string();
-            run_ctx.go_to_backgrond(Box::new(move |background_ctx| {
-                let stream_run_ctx =
-                    ExecutionCtx::BackgroundStreamProcessing(background_ctx.as_ref());
-                let res = internals.process_record_internal(
+            let bg_redis_client = run_ctx.get_background_redis_client();
+            run_ctx.go_to_backgrond(Box::new(move || {
+                internals.process_record_internal_async(
                     &stream_name.to_string(),
                     record,
-                    stream_run_ctx,
+                    bg_redis_client,
+                    ack_callback,
                 );
-                ack_callback(res.unwrap());
             }));
             None
         } else {
-            let stream_run_ctx = ExecutionCtx::StreamProcessing(run_ctx);
-            self.internals
-                .process_record_internal(stream_name, record, stream_run_ctx)
+            self.internals.process_record_internal_sync(stream_name, record, run_ctx)
         }
     }
 }

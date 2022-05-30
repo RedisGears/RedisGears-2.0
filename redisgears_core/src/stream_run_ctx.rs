@@ -1,72 +1,47 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    stream_ctx::BackgroundStreamProcessCtxInterface,
-    stream_ctx::BackgroundStreamScopeGuardInterface, stream_ctx::StreamCtxInterface,
+    stream_ctx::StreamCtxInterface,
     stream_ctx::StreamProcessCtxInterface, stream_ctx::StreamRecordAck,
-    stream_ctx::StreamRecordInterface, CallResult,
+    stream_ctx::StreamRecordInterface,
+    run_function_ctx::RedisLogerCtxInterface,
+    run_function_ctx::RedisClientCtxInterface,
+    run_function_ctx::BackgroundRunFunctionCtxInterface,
+
 };
 
 use redis_module::{
-    context::thread_safe::ContextGuard, raw::RedisModuleStreamID, stream::StreamRecord,
-    DetachedFromClient, RedisError, ThreadSafeContext,
+    raw::RedisModuleStreamID, stream::StreamRecord,
+    ThreadSafeContext,
 };
 
-use crate::{get_ctx, get_thread_pool, redis_value_to_call_reply};
+use crate::{get_ctx, get_thread_pool, run_ctx::RedisClient, background_run_ctx::BackgroundRunCtx};
 
 use crate::stream_reader::{StreamConsumer, StreamReaderAck};
 
-pub(crate) struct BackgroundStreamScopeGuard {
-    _gaurd: ContextGuard,
-}
-
-impl BackgroundStreamScopeGuardInterface for BackgroundStreamScopeGuard {
-    fn call(&self, command: &str, args: &[&str]) -> CallResult {
-        let redis_ctx = get_ctx();
-        let res = redis_ctx.call(command, args);
-        match res {
-            Ok(r) => redis_value_to_call_reply(r),
-            Err(e) => match e {
-                RedisError::Str(s) => CallResult::Error(s.to_string()),
-                RedisError::String(s) => CallResult::Error(s),
-                RedisError::WrongArity => CallResult::Error("Wrong arity".to_string()),
-                RedisError::WrongType => CallResult::Error("Wrong type".to_string()),
-            },
-        }
-    }
-}
-
-pub(crate) struct BackgroundStreamProcessCtx {
-    ctx: ThreadSafeContext<DetachedFromClient>,
-}
-
-impl BackgroundStreamProcessCtxInterface for BackgroundStreamProcessCtx {
-    fn log(&self, msg: &str) {
-        get_ctx().log_notice(msg);
-    }
-
-    fn lock<'a>(&'a self) -> Box<dyn BackgroundStreamScopeGuardInterface + 'a> {
-        let gaurd = self.ctx.lock();
-        Box::new(BackgroundStreamScopeGuard { _gaurd: gaurd })
-    }
-}
-
 pub(crate) struct StreamRunCtx;
 
-impl StreamProcessCtxInterface for StreamRunCtx {
+impl RedisLogerCtxInterface for StreamRunCtx {
     fn log(&self, msg: &str) {
         get_ctx().log_notice(msg);
     }
+}
 
-    fn call(&self, _command: &str, _args: &[&str]) -> CallResult {
-        CallResult::Error("Not yet implemented".to_string())
+impl StreamProcessCtxInterface for StreamRunCtx {
+    
+
+    fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface> {
+        Box::new(RedisClient{})
+    }
+
+    fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
+        Box::new(BackgroundRunCtx {})
     }
 
     fn go_to_backgrond(
         &self,
-        func: Box<dyn FnOnce(Box<dyn BackgroundStreamProcessCtxInterface>) + Send>,
+        func: Box<dyn FnOnce() + Send>,
     ) {
         get_thread_pool().execute(move || {
-            let ctx = ThreadSafeContext::new();
-            func(Box::new(BackgroundStreamProcessCtx { ctx: ctx }));
+            func();
         });
     }
 }

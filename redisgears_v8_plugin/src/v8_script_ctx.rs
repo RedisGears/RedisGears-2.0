@@ -7,8 +7,6 @@ use v8_rs::v8::{
     v8_script::V8PersistedScript,
 };
 
-use crate::v8_native_functions::ExecutionCtx;
-
 use std::rc::Rc;
 
 pub(crate) struct V8ScriptCtx {
@@ -40,21 +38,20 @@ impl LibraryCtxInterface for V8ScriptCtx {
         let _handlers_scope = self.isolate.new_handlers_scope();
         let ctx_scope = self.ctx.enter();
         let trycatch = self.isolate.new_try_catch();
-        let execution_ctx = ExecutionCtx::Load(load_library_ctx);
 
         let script = self.script.to_local(&self.isolate);
 
         // set private content
-        self.ctx.set_private_data(0, Some(&execution_ctx));
+        self.ctx.set_private_data(0, Some(&load_library_ctx));
         self.ctx.set_private_data(1, Some(&self.ctx));
         self.ctx.set_private_data(2, Some(&self.isolate));
 
         let res = script.run(&ctx_scope);
 
         // reset private data
-        self.ctx.set_private_data::<ExecutionCtx>(0, None);
-        self.ctx.set_private_data::<ExecutionCtx>(1, None);
-        self.ctx.set_private_data::<ExecutionCtx>(2, None);
+        self.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
+        self.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(1, None);
+        self.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(2, None);
 
         if res.is_none() {
             let error_utf8 = trycatch.get_exception().to_utf8(&self.isolate).unwrap();

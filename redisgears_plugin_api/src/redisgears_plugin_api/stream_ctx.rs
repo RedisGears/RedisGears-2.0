@@ -1,20 +1,13 @@
-use crate::redisgears_plugin_api::CallResult;
+use crate::redisgears_plugin_api::run_function_ctx::RedisClientCtxInterface;
+use crate::redisgears_plugin_api::run_function_ctx::BackgroundRunFunctionCtxInterface;
+use crate::redisgears_plugin_api::run_function_ctx::RedisLogerCtxInterface;
 
-pub trait BackgroundStreamScopeGuardInterface {
-    fn call(&self, command: &str, args: &[&str]) -> CallResult;
-}
-
-pub trait BackgroundStreamProcessCtxInterface {
-    fn log(&self, msg: &str);
-    fn lock<'a>(&'a self) -> Box<dyn BackgroundStreamScopeGuardInterface + 'a>;
-}
-
-pub trait StreamProcessCtxInterface {
-    fn log(&self, msg: &str);
-    fn call(&self, command: &str, args: &[&str]) -> CallResult;
+pub trait StreamProcessCtxInterface: RedisLogerCtxInterface {
+    fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface>;
+    fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface>;
     fn go_to_backgrond(
         &self,
-        func: Box<dyn FnOnce(Box<dyn BackgroundStreamProcessCtxInterface>) + Send>,
+        func: Box<dyn FnOnce() + Send>,
     );
 }
 
