@@ -6,18 +6,12 @@ use redisgears_plugin_api::redisgears_plugin_api::stream_ctx::{
     StreamCtxInterface, StreamProcessCtxInterface, StreamRecordAck, StreamRecordInterface,
 };
 
-use redisgears_plugin_api::redisgears_plugin_api::run_function_ctx::{
-    BackgroundRunFunctionCtxInterface,
-};
+use redisgears_plugin_api::redisgears_plugin_api::run_function_ctx::BackgroundRunFunctionCtxInterface;
 
-use crate::v8_native_functions::{
-    get_redis_client,
-    get_backgrounnd_client,
-    RedisClient,
-};
+use crate::v8_native_functions::{get_backgrounnd_client, get_redis_client, RedisClient};
 
-use std::sync::Arc;
 use std::cell::RefCell;
+use std::sync::Arc;
 
 use std::str;
 
@@ -120,7 +114,10 @@ impl V8StreamCtxInternals {
         let res = self
             .persisted_function
             .as_local(self.isolate.as_ref())
-            .call(&ctx_scope, Some(&[&r_client.to_value(), &stream_data.to_value()]));
+            .call(
+                &ctx_scope,
+                Some(&[&r_client.to_value(), &stream_data.to_value()]),
+            );
 
         Some(match res {
             Some(_) => StreamRecordAck::Ack,
@@ -197,7 +194,10 @@ impl V8StreamCtxInternals {
         let res = self
             .persisted_function
             .as_local(self.isolate.as_ref())
-            .call(&ctx_scope, Some(&[&r_client.to_value(), &stream_data.to_value()]));
+            .call(
+                &ctx_scope,
+                Some(&[&r_client.to_value(), &stream_data.to_value()]),
+            );
 
         match res {
             Some(_) => ack_callback(StreamRecordAck::Ack),
@@ -232,7 +232,8 @@ impl StreamCtxInterface for V8StreamCtx {
             }));
             None
         } else {
-            self.internals.process_record_internal_sync(stream_name, record, run_ctx)
+            self.internals
+                .process_record_internal_sync(stream_name, record, run_ctx)
         }
     }
 }

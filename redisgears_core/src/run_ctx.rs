@@ -1,9 +1,10 @@
 use redis_module::{Context, RedisError, ThreadSafeContext};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
-    run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RunFunctionCtxInterface,
-    CallResult, run_function_ctx::ReplyCtxInterface, run_function_ctx::RedisLogerCtxInterface,
-    run_function_ctx::RedisClientCtxInterface, run_function_ctx::RedisBackgroundExecuterCtxInterface,
+    run_function_ctx::BackgroundRunFunctionCtxInterface,
+    run_function_ctx::RedisBackgroundExecuterCtxInterface,
+    run_function_ctx::RedisClientCtxInterface, run_function_ctx::RedisLogerCtxInterface,
+    run_function_ctx::ReplyCtxInterface, run_function_ctx::RunFunctionCtxInterface, CallResult,
 };
 
 use crate::{get_ctx, get_thread_pool, redis_value_to_call_reply};
@@ -23,7 +24,7 @@ impl RedisLogerCtxInterface for RedisClient {
     }
 }
 
-impl RedisBackgroundExecuterCtxInterface for  RedisClient {
+impl RedisBackgroundExecuterCtxInterface for RedisClient {
     fn run_on_backgrond(&self, func: Box<dyn FnOnce() + Send>) {
         get_thread_pool().execute(move || {
             func();
@@ -109,7 +110,7 @@ impl<'a> RedisBackgroundExecuterCtxInterface for RunCtx<'a> {
 impl<'a> RunFunctionCtxInterface for RunCtx<'a> {
     fn next_arg(&mut self) -> Option<&[u8]> {
         Some(self.iter.next()?.as_slice())
-    }  
+    }
 
     fn get_background_client(&self) -> Box<dyn ReplyCtxInterface> {
         let blocked_client = self.ctx.block_client();
@@ -121,8 +122,8 @@ impl<'a> RunFunctionCtxInterface for RunCtx<'a> {
         })
     }
 
-    fn get_redis_client(& self) -> Box<dyn RedisClientCtxInterface> {
-        Box::new(RedisClient{})
+    fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface> {
+        Box::new(RedisClient {})
     }
 }
 

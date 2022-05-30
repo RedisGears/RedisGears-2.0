@@ -1,22 +1,20 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    load_library_ctx::LoadLibraryCtxInterface,
-    run_function_ctx::BackgroundRunFunctionCtxInterface,
-    CallResult, GearsApiError,
-    run_function_ctx::RedisClientCtxInterface,
+    load_library_ctx::LoadLibraryCtxInterface, run_function_ctx::BackgroundRunFunctionCtxInterface,
+    run_function_ctx::RedisClientCtxInterface, CallResult, GearsApiError,
 };
 
 use v8_rs::v8::{
     isolate::V8Isolate, v8_context::V8Context, v8_context_scope::V8ContextScope,
-    v8_object_template::V8LocalObjectTemplate, v8_value::V8LocalValue, v8_version,
-    v8_object::V8LocalObject,
+    v8_object::V8LocalObject, v8_object_template::V8LocalObjectTemplate, v8_value::V8LocalValue,
+    v8_version,
 };
 
 use crate::v8_function_ctx::V8Function;
 use crate::v8_stream_ctx::V8StreamCtx;
 
+use std::cell::RefCell;
 use std::str;
 use std::sync::Arc;
-use std::cell::RefCell;
 
 pub(crate) fn call_result_to_js_object(
     isolate: &V8Isolate,
@@ -65,8 +63,8 @@ pub(crate) struct RedisClient {
 }
 
 impl RedisClient {
-    pub(crate) fn new() -> RedisClient{
-        RedisClient{ client: None }
+    pub(crate) fn new() -> RedisClient {
+        RedisClient { client: None }
     }
 
     pub(crate) fn make_invalid(&mut self) {
@@ -78,177 +76,226 @@ impl RedisClient {
     }
 }
 
-pub(crate) fn get_backgrounnd_client(isolate: &Arc<V8Isolate>, ctx: &Arc<V8Context>, ctx_scope: &V8ContextScope, redis_background_client: Box<dyn BackgroundRunFunctionCtxInterface>) -> V8LocalObject {
+pub(crate) fn get_backgrounnd_client(
+    isolate: &Arc<V8Isolate>,
+    ctx: &Arc<V8Context>,
+    ctx_scope: &V8ContextScope,
+    redis_background_client: Box<dyn BackgroundRunFunctionCtxInterface>,
+) -> V8LocalObject {
     let bg_client = isolate.new_object();
     let redis_background_client = Arc::new(redis_background_client);
     let redis_background_client_ref = Arc::clone(&redis_background_client);
     let isolate_ref = Arc::clone(isolate);
     let ctx_ref = Arc::clone(ctx);
-    bg_client.set(ctx_scope, &isolate.new_string("block").to_value(), &ctx_scope.new_native_function(move |args, isolate, ctx_scope|{
-        if args.len() < 1 {
-            isolate.raise_exception_str("Wrong number of arguments to 'block' function");
-            return None;
-        }
-        let f = args.get(0);
-        if !f.is_function() {
-            isolate.raise_exception_str("Argument to 'block' must be a function");
-            return None;
-        }
-        let redis_client = {
-            let _unlocker = isolate.new_unlocker();
-            redis_background_client_ref.lock()
-        };
-        let r_client = Arc::new(RefCell::new(RedisClient::new()));
-        r_client.borrow_mut().set_client(redis_client);
-        let c = get_redis_client(&isolate_ref, &ctx_ref, ctx_scope, &r_client);
-        let res = f.call(ctx_scope, Some(&[&c.to_value()]));
-        r_client.borrow_mut().make_invalid();
-        res
-    }).to_value());
+    bg_client.set(
+        ctx_scope,
+        &isolate.new_string("block").to_value(),
+        &ctx_scope
+            .new_native_function(move |args, isolate, ctx_scope| {
+                if args.len() < 1 {
+                    isolate.raise_exception_str("Wrong number of arguments to 'block' function");
+                    return None;
+                }
+                let f = args.get(0);
+                if !f.is_function() {
+                    isolate.raise_exception_str("Argument to 'block' must be a function");
+                    return None;
+                }
+                let redis_client = {
+                    let _unlocker = isolate.new_unlocker();
+                    redis_background_client_ref.lock()
+                };
+                let r_client = Arc::new(RefCell::new(RedisClient::new()));
+                r_client.borrow_mut().set_client(redis_client);
+                let c = get_redis_client(&isolate_ref, &ctx_ref, ctx_scope, &r_client);
+                let res = f.call(ctx_scope, Some(&[&c.to_value()]));
+                r_client.borrow_mut().make_invalid();
+                res
+            })
+            .to_value(),
+    );
 
     let redis_background_client_ref = Arc::clone(&redis_background_client);
-    bg_client.set(ctx_scope, &isolate.new_string("log").to_value(), &ctx_scope.new_native_function(move |args, isolate, _ctx_scope|{
-        if args.len() != 1 {
-            isolate.raise_exception_str("Wrong number of arguments to 'log' function");
-            return None;
-        }
+    bg_client.set(
+        ctx_scope,
+        &isolate.new_string("log").to_value(),
+        &ctx_scope
+            .new_native_function(move |args, isolate, _ctx_scope| {
+                if args.len() != 1 {
+                    isolate.raise_exception_str("Wrong number of arguments to 'log' function");
+                    return None;
+                }
 
-        let msg = args.get(0);
-        if !msg.is_string() {
-            isolate.raise_exception_str("First argument to 'log' must be a string message");
-            return None;
-        }
+                let msg = args.get(0);
+                if !msg.is_string() {
+                    isolate.raise_exception_str("First argument to 'log' must be a string message");
+                    return None;
+                }
 
-        let msg_utf8 = msg.to_utf8(isolate).unwrap();
-        redis_background_client_ref.log(msg_utf8.as_str());
-        None
-    }).to_value());
+                let msg_utf8 = msg.to_utf8(isolate).unwrap();
+                redis_background_client_ref.log(msg_utf8.as_str());
+                None
+            })
+            .to_value(),
+    );
     bg_client
 }
 
-pub(crate) fn get_redis_client(isolate: &Arc<V8Isolate>, ctx: &Arc<V8Context>, ctx_scope: &V8ContextScope, redis_client: &Arc<RefCell<RedisClient>>) -> V8LocalObject {
+pub(crate) fn get_redis_client(
+    isolate: &Arc<V8Isolate>,
+    ctx: &Arc<V8Context>,
+    ctx_scope: &V8ContextScope,
+    redis_client: &Arc<RefCell<RedisClient>>,
+) -> V8LocalObject {
     let client = isolate.new_object();
 
     let redis_client_ref = Arc::clone(redis_client);
-    client.set(ctx_scope, &isolate.new_string("call").to_value(), &ctx_scope.new_native_function(move |args, isolate, ctx_scope|{
-        if args.len() < 1 {
-            isolate.raise_exception_str("Wrong number of arguments to 'call' function");
-            return None;
-        }
+    client.set(
+        ctx_scope,
+        &isolate.new_string("call").to_value(),
+        &ctx_scope
+            .new_native_function(move |args, isolate, ctx_scope| {
+                if args.len() < 1 {
+                    isolate.raise_exception_str("Wrong number of arguments to 'call' function");
+                    return None;
+                }
 
-        let command = args.get(0);
-        if !command.is_string() {
-            isolate.raise_exception_str("First argument to 'command' must be a string");
-            return None;
-        }
+                let command = args.get(0);
+                if !command.is_string() {
+                    isolate.raise_exception_str("First argument to 'command' must be a string");
+                    return None;
+                }
 
-        let command_utf8 = command.to_utf8(isolate).unwrap();
+                let command_utf8 = command.to_utf8(isolate).unwrap();
 
-        let mut commands_args_str = Vec::new();
-        for i in 1..args.len() {
-            commands_args_str.push(args.get(i).to_utf8(isolate).unwrap());
-        }
+                let mut commands_args_str = Vec::new();
+                for i in 1..args.len() {
+                    commands_args_str.push(args.get(i).to_utf8(isolate).unwrap());
+                }
 
-        let command_args_rust_str = commands_args_str
-            .iter()
-            .map(|v| v.as_str())
-            .collect::<Vec<&str>>();
+                let command_args_rust_str = commands_args_str
+                    .iter()
+                    .map(|v| v.as_str())
+                    .collect::<Vec<&str>>();
 
-        let res = match redis_client_ref.borrow().client.as_ref(){
-            Some(c) => c.call(command_utf8.as_str(), &command_args_rust_str),
-            None => {
-                isolate.raise_exception_str("Used on invalid client");
-                return None;
-            }
-            
-        };
+                let res = match redis_client_ref.borrow().client.as_ref() {
+                    Some(c) => c.call(command_utf8.as_str(), &command_args_rust_str),
+                    None => {
+                        isolate.raise_exception_str("Used on invalid client");
+                        return None;
+                    }
+                };
 
-        call_result_to_js_object(isolate, ctx_scope, res)
-    }).to_value());
+                call_result_to_js_object(isolate, ctx_scope, res)
+            })
+            .to_value(),
+    );
 
     let redis_client_ref = Arc::clone(redis_client);
-    client.set(ctx_scope, &isolate.new_string("log").to_value(), &ctx_scope.new_native_function(move |args, isolate, _ctx_scope|{
-        if args.len() != 1 {
-            isolate.raise_exception_str("Wrong number of arguments to 'log' function");
-            return None;
-        }
+    client.set(
+        ctx_scope,
+        &isolate.new_string("log").to_value(),
+        &ctx_scope
+            .new_native_function(move |args, isolate, _ctx_scope| {
+                if args.len() != 1 {
+                    isolate.raise_exception_str("Wrong number of arguments to 'log' function");
+                    return None;
+                }
 
-        let msg = args.get(0);
-        if !msg.is_string() {
-            isolate.raise_exception_str("First argument to 'log' must be a string message");
-            return None;
-        }
+                let msg = args.get(0);
+                if !msg.is_string() {
+                    isolate.raise_exception_str("First argument to 'log' must be a string message");
+                    return None;
+                }
 
-        let msg_utf8 = msg.to_utf8(isolate).unwrap();
-        match redis_client_ref.borrow().client.as_ref() {
-            Some(r_c) => r_c.log(msg_utf8.as_str()),
-            None => {
-                isolate.raise_exception_str("Used on invalid client");
-                return None;
-            }
-        };
-        None
-    }).to_value());
+                let msg_utf8 = msg.to_utf8(isolate).unwrap();
+                match redis_client_ref.borrow().client.as_ref() {
+                    Some(r_c) => r_c.log(msg_utf8.as_str()),
+                    None => {
+                        isolate.raise_exception_str("Used on invalid client");
+                        return None;
+                    }
+                };
+                None
+            })
+            .to_value(),
+    );
 
     let redis_client_ref = Arc::clone(redis_client);
     let isolate_ref = Arc::clone(isolate);
     let ctx_ref = Arc::clone(ctx);
-    client.set(ctx_scope, &isolate.new_string("run_on_background").to_value(), &ctx_scope.new_native_function(move |args, isolate, ctx_scope|{
-        if args.len() != 1 {
-            isolate.raise_exception_str("Wrong number of arguments to 'run_on_background' function");
-            return None;
-        }
+    client.set(
+        ctx_scope,
+        &isolate.new_string("run_on_background").to_value(),
+        &ctx_scope
+            .new_native_function(move |args, isolate, ctx_scope| {
+                if args.len() != 1 {
+                    isolate.raise_exception_str(
+                        "Wrong number of arguments to 'run_on_background' function",
+                    );
+                    return None;
+                }
 
-        let bg_redis_client = match redis_client_ref.borrow().client.as_ref() {
-            Some(c) => c.get_background_redis_client(),
-            None => {
-                isolate.raise_exception_str("Called 'run_on_background' out of context");
-                return None;
-            }
-        };
-
-        let f = args.get(0);
-        if !f.is_async_function() {
-            isolate.raise_exception_str("First argument to 'run_on_background' must be an async function");
-            return None;
-        }
-        let f = f.persist(isolate);
-
-        let isolate_ref = Arc::clone(&isolate_ref);
-        let ctx_ref = Arc::clone(&ctx_ref);
-
-        match redis_client_ref.borrow().client.as_ref() {
-            Some(r_c) => {
-                let resolver = ctx_scope.new_resolver();
-                let promise = resolver.get_promise();
-                let resolver = resolver.to_value().persist(isolate);
-                r_c.run_on_backgrond(Box::new(move|| {
-                    let _isolate_scope = isolate_ref.enter();
-                    let _handlers_scope = isolate_ref.new_handlers_scope();
-                    let ctx_scope = ctx_ref.enter();
-                    let trycatch = isolate_ref.new_try_catch();
-
-                    let background_client = get_backgrounnd_client(&isolate_ref, &ctx_ref, &ctx_scope, bg_redis_client);
-                    let res = f.as_local(&isolate_ref).call(&ctx_scope, Some(&[&background_client.to_value()]));
-
-                    let resolver = resolver.as_local(&isolate_ref).as_resolver();
-                    match res {
-                        Some(r) => resolver.resolve(&ctx_scope, &r),
-                        None => {
-                            let error_utf8 = trycatch.get_exception();
-                            resolver.resolve(&ctx_scope, &error_utf8);
-                        }
+                let bg_redis_client = match redis_client_ref.borrow().client.as_ref() {
+                    Some(c) => c.get_background_redis_client(),
+                    None => {
+                        isolate.raise_exception_str("Called 'run_on_background' out of context");
+                        return None;
                     }
-                    
-                }));
-                Some(promise.to_value())
-            }
-            None => {
-                isolate.raise_exception_str("Used on invalid client");
-                None
-            }
-        }
-    }).to_value());
+                };
+
+                let f = args.get(0);
+                if !f.is_async_function() {
+                    isolate.raise_exception_str(
+                        "First argument to 'run_on_background' must be an async function",
+                    );
+                    return None;
+                }
+                let f = f.persist(isolate);
+
+                let isolate_ref = Arc::clone(&isolate_ref);
+                let ctx_ref = Arc::clone(&ctx_ref);
+
+                match redis_client_ref.borrow().client.as_ref() {
+                    Some(r_c) => {
+                        let resolver = ctx_scope.new_resolver();
+                        let promise = resolver.get_promise();
+                        let resolver = resolver.to_value().persist(isolate);
+                        r_c.run_on_backgrond(Box::new(move || {
+                            let _isolate_scope = isolate_ref.enter();
+                            let _handlers_scope = isolate_ref.new_handlers_scope();
+                            let ctx_scope = ctx_ref.enter();
+                            let trycatch = isolate_ref.new_try_catch();
+
+                            let background_client = get_backgrounnd_client(
+                                &isolate_ref,
+                                &ctx_ref,
+                                &ctx_scope,
+                                bg_redis_client,
+                            );
+                            let res = f
+                                .as_local(&isolate_ref)
+                                .call(&ctx_scope, Some(&[&background_client.to_value()]));
+
+                            let resolver = resolver.as_local(&isolate_ref).as_resolver();
+                            match res {
+                                Some(r) => resolver.resolve(&ctx_scope, &r),
+                                None => {
+                                    let error_utf8 = trycatch.get_exception();
+                                    resolver.resolve(&ctx_scope, &error_utf8);
+                                }
+                            }
+                        }));
+                        Some(promise.to_value())
+                    }
+                    None => {
+                        isolate.raise_exception_str("Used on invalid client");
+                        None
+                    }
+                }
+            })
+            .to_value(),
+    );
 
     client
 }
@@ -348,11 +395,11 @@ pub(crate) fn get_globals(isolate: &V8Isolate) -> V8LocalObjectTemplate {
         let c = Arc::new(RefCell::new(RedisClient::new()));
         let redis_client = get_redis_client(isolate, ctx, curr_ctx_scope, &c);
 
-        let f = V8Function::new(ctx, 
-            isolate, 
+        let f = V8Function::new(ctx,
+            isolate,
             persisted_function,
             redis_client.to_value().persist(isolate),
-            &c, 
+            &c,
             function_callback.is_async_function()
         );
 
@@ -385,13 +432,14 @@ pub(crate) fn get_globals(isolate: &V8Isolate) -> V8LocalObjectTemplate {
         }
 
         let msg_utf8 = msg.to_utf8(isolate).unwrap();
-        let load_ctx = match curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0) {
-            Some(r_c) => r_c,
-            None => {
-                isolate.raise_exception_str("Called 'log' function out of context");
-                return None;
-            }
-        };
+        let load_ctx =
+            match curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0) {
+                Some(r_c) => r_c,
+                None => {
+                    isolate.raise_exception_str("Called 'log' function out of context");
+                    return None;
+                }
+            };
         load_ctx.log(msg_utf8.as_str());
         None
     });

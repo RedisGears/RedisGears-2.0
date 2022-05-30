@@ -1,12 +1,13 @@
 use redis_module::{context::thread_safe::ContextGuard, Context, RedisError};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
-    run_function_ctx::RedisClientCtxInterface, CallResult,
-    run_function_ctx::RedisLogerCtxInterface, run_function_ctx::RedisBackgroundExecuterCtxInterface,
     run_function_ctx::BackgroundRunFunctionCtxInterface,
+    run_function_ctx::RedisBackgroundExecuterCtxInterface,
+    run_function_ctx::RedisClientCtxInterface, run_function_ctx::RedisLogerCtxInterface,
+    CallResult,
 };
 
-use crate::{redis_value_to_call_reply, get_thread_pool, background_run_ctx::BackgroundRunCtx};
+use crate::{background_run_ctx::BackgroundRunCtx, get_thread_pool, redis_value_to_call_reply};
 
 pub(crate) struct BackgroundRunScopeGuardCtx<'a> {
     pub(crate) _ctx_guard: ContextGuard,
@@ -22,7 +23,7 @@ impl<'a> RedisLogerCtxInterface for BackgroundRunScopeGuardCtx<'a> {
 unsafe impl<'a> Sync for BackgroundRunScopeGuardCtx<'a> {}
 unsafe impl<'a> Send for BackgroundRunScopeGuardCtx<'a> {}
 
-impl<'a> RedisBackgroundExecuterCtxInterface for  BackgroundRunScopeGuardCtx<'a> {
+impl<'a> RedisBackgroundExecuterCtxInterface for BackgroundRunScopeGuardCtx<'a> {
     fn run_on_backgrond(&self, func: Box<dyn FnOnce() + Send>) {
         get_thread_pool().execute(move || {
             func();

@@ -49,9 +49,12 @@ impl LibraryCtxInterface for V8ScriptCtx {
         let res = script.run(&ctx_scope);
 
         // reset private data
-        self.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
-        self.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(1, None);
-        self.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(2, None);
+        self.ctx
+            .set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
+        self.ctx
+            .set_private_data::<&mut dyn LoadLibraryCtxInterface>(1, None);
+        self.ctx
+            .set_private_data::<&mut dyn LoadLibraryCtxInterface>(2, None);
 
         if res.is_none() {
             let error_utf8 = trycatch.get_exception().to_utf8(&self.isolate).unwrap();

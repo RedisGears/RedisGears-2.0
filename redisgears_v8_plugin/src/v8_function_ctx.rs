@@ -1,8 +1,7 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    function_ctx::FunctionCtxInterface, run_function_ctx::RunFunctionCtxInterface,
+    function_ctx::FunctionCtxInterface, run_function_ctx::BackgroundRunFunctionCtxInterface,
+    run_function_ctx::ReplyCtxInterface, run_function_ctx::RunFunctionCtxInterface,
     FunctionCallResult,
-    run_function_ctx::ReplyCtxInterface,
-    run_function_ctx::BackgroundRunFunctionCtxInterface,
 };
 
 use v8_rs::v8::{
@@ -10,10 +9,7 @@ use v8_rs::v8::{
     v8_promise::V8PromiseState, v8_value::V8LocalValue, v8_value::V8PersistValue,
 };
 
-use crate::v8_native_functions::{
-    RedisClient,
-    get_backgrounnd_client,
-};
+use crate::v8_native_functions::{get_backgrounnd_client, RedisClient};
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -21,7 +17,7 @@ use std::sync::Arc;
 use std::str;
 
 struct BackgroundClientHolder {
-    c: Option<Box<dyn ReplyCtxInterface>>
+    c: Option<Box<dyn ReplyCtxInterface>>,
 }
 
 impl BackgroundClientHolder {
@@ -70,15 +66,25 @@ fn send_reply(
 }
 
 impl V8InternalFunction {
-    fn call_async(&self, command_args: Vec<String>, bg_client: Box<dyn ReplyCtxInterface>, redis_background_client: Box<dyn BackgroundRunFunctionCtxInterface>) -> FunctionCallResult {
+    fn call_async(
+        &self,
+        command_args: Vec<String>,
+        bg_client: Box<dyn ReplyCtxInterface>,
+        redis_background_client: Box<dyn BackgroundRunFunctionCtxInterface>,
+    ) -> FunctionCallResult {
         let _isolate_scope = self.isolate.enter();
         let _handlers_scope = self.isolate.new_handlers_scope();
         let ctx_scope = self.ctx.enter();
         let trycatch = self.isolate.new_try_catch();
 
         let res = {
-            let r_client = get_backgrounnd_client(&self.isolate, &self.ctx, &ctx_scope, redis_background_client);
-            let args ={
+            let r_client = get_backgrounnd_client(
+                &self.isolate,
+                &self.ctx,
+                &ctx_scope,
+                redis_background_client,
+            );
+            let args = {
                 let mut args = Vec::new();
                 args.push(r_client.to_value());
                 for arg in command_args.iter() {
@@ -117,7 +123,7 @@ impl V8InternalFunction {
                             bg_client.reply_with_error(r.as_str());
                         }
                     } else {
-                        let bg_execution_ctx = BackgroundClientHolder{c:Some(bg_client)};
+                        let bg_execution_ctx = BackgroundClientHolder { c: Some(bg_client) };
                         let execution_ctx_resolve = Arc::new(RefCell::new(bg_execution_ctx));
                         let execution_ctx_reject = Arc::clone(&execution_ctx_resolve);
                         let resolve =
@@ -125,7 +131,11 @@ impl V8InternalFunction {
                                 let reply = args.get(0);
                                 let reply = reply.to_utf8(isolate).unwrap();
                                 let mut execution_ctx = execution_ctx_resolve.borrow_mut();
-                                execution_ctx.c.as_ref().unwrap().reply_with_bulk_string(reply.as_str());
+                                execution_ctx
+                                    .c
+                                    .as_ref()
+                                    .unwrap()
+                                    .reply_with_bulk_string(reply.as_str());
                                 execution_ctx.unblock();
                                 None
                             });
@@ -134,7 +144,11 @@ impl V8InternalFunction {
                                 let reply = args.get(0);
                                 let reply = reply.to_utf8(isolate).unwrap();
                                 let mut execution_ctx = execution_ctx_reject.borrow_mut();
-                                execution_ctx.c.as_ref().unwrap().reply_with_error(reply.as_str());
+                                execution_ctx
+                                    .c
+                                    .as_ref()
+                                    .unwrap()
+                                    .reply_with_error(reply.as_str());
                                 execution_ctx.unblock();
                                 None
                             });
@@ -154,14 +168,13 @@ impl V8InternalFunction {
     }
 
     fn call_sync(&self, run_ctx: &mut dyn RunFunctionCtxInterface) -> FunctionCallResult {
-
         let _isolate_scope = self.isolate.enter();
         let _handlers_scope = self.isolate.new_handlers_scope();
         let ctx_scope = self.ctx.enter();
         let trycatch = self.isolate.new_try_catch();
 
         let res = {
-            let args ={
+            let args = {
                 let mut args = Vec::new();
                 args.push(self.persisted_client.as_local(&self.isolate));
                 while let Some(a) = run_ctx.next_arg() {
@@ -207,7 +220,9 @@ impl V8InternalFunction {
                             run_ctx.reply_with_error(r.as_str());
                         }
                     } else {
-                        let bg_execution_ctx = BackgroundClientHolder{c:Some(run_ctx.get_background_client())};
+                        let bg_execution_ctx = BackgroundClientHolder {
+                            c: Some(run_ctx.get_background_client()),
+                        };
                         let execution_ctx_resolve = Arc::new(RefCell::new(bg_execution_ctx));
                         let execution_ctx_reject = Arc::clone(&execution_ctx_resolve);
                         let resolve =
@@ -215,7 +230,11 @@ impl V8InternalFunction {
                                 let reply = args.get(0);
                                 let reply = reply.to_utf8(isolate).unwrap();
                                 let mut execution_ctx = execution_ctx_resolve.borrow_mut();
-                                execution_ctx.c.as_ref().unwrap().reply_with_bulk_string(reply.as_str());
+                                execution_ctx
+                                    .c
+                                    .as_ref()
+                                    .unwrap()
+                                    .reply_with_bulk_string(reply.as_str());
                                 execution_ctx.unblock();
                                 None
                             });
@@ -224,7 +243,11 @@ impl V8InternalFunction {
                                 let reply = args.get(0);
                                 let reply = reply.to_utf8(isolate).unwrap();
                                 let mut execution_ctx = execution_ctx_reject.borrow_mut();
-                                execution_ctx.c.as_ref().unwrap().reply_with_error(reply.as_str());
+                                execution_ctx
+                                    .c
+                                    .as_ref()
+                                    .unwrap()
+                                    .reply_with_error(reply.as_str());
                                 execution_ctx.unblock();
                                 None
                             });

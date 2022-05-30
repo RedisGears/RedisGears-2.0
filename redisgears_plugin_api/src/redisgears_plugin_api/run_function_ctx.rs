@@ -8,13 +8,15 @@ pub trait RedisBackgroundExecuterCtxInterface {
     fn run_on_backgrond(&self, func: Box<dyn FnOnce() + Send>);
 }
 
-pub trait RedisClientCtxInterface: RedisLogerCtxInterface + RedisBackgroundExecuterCtxInterface + Send + Sync {
+pub trait RedisClientCtxInterface:
+    RedisLogerCtxInterface + RedisBackgroundExecuterCtxInterface + Send + Sync
+{
     fn call(&self, command: &str, args: &[&str]) -> CallResult;
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface>;
     fn as_redis_client(&self) -> &dyn RedisClientCtxInterface;
 }
 
-pub trait ReplyCtxInterface: Send + Sync  {
+pub trait ReplyCtxInterface: Send + Sync {
     fn reply_with_simple_string(&self, val: &str);
     fn reply_with_error(&self, val: &str);
     fn reply_with_long(&self, val: i64);
@@ -24,11 +26,13 @@ pub trait ReplyCtxInterface: Send + Sync  {
     fn as_client(&self) -> &dyn ReplyCtxInterface;
 }
 
-pub trait BackgroundRunFunctionCtxInterface: RedisLogerCtxInterface + RedisBackgroundExecuterCtxInterface + Send + Sync {
-    fn lock<'a>(&'a self) ->  Box<dyn RedisClientCtxInterface>;
+pub trait BackgroundRunFunctionCtxInterface:
+    RedisLogerCtxInterface + RedisBackgroundExecuterCtxInterface + Send + Sync
+{
+    fn lock<'a>(&'a self) -> Box<dyn RedisClientCtxInterface>;
 }
 
-pub trait RunFunctionCtxInterface: ReplyCtxInterface + RedisBackgroundExecuterCtxInterface{
+pub trait RunFunctionCtxInterface: ReplyCtxInterface + RedisBackgroundExecuterCtxInterface {
     fn next_arg<'a>(&'a mut self) -> Option<&'a [u8]>;
     fn get_background_client(&self) -> Box<dyn ReplyCtxInterface>;
     fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface>;
