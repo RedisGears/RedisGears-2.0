@@ -51,7 +51,11 @@ impl BackendCtxInterface for V8Backend {
         Ok(())
     }
 
-    fn compile_library(&self, blob: &str, run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError> {
+    fn compile_library(
+        &self,
+        blob: &str,
+        run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
+    ) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError> {
         let isolate = V8Isolate::new();
 
         let script_ctx = {
@@ -91,6 +95,8 @@ impl BackendCtxInterface for V8Backend {
             script_ctx
         };
 
-        Ok(Box::new(V8LibraryCtx{script_ctx: script_ctx}))
+        Ok(Box::new(V8LibraryCtx {
+            script_ctx: script_ctx,
+        }))
     }
 }

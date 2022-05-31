@@ -1,6 +1,6 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    run_function_ctx::BackgroundRunFunctionCtxInterface,
-    run_function_ctx::RedisClientCtxInterface, run_function_ctx::RedisLogerCtxInterface,
+    run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
+    run_function_ctx::RedisLogerCtxInterface,
 };
 
 use crate::run_ctx::RedisClient;

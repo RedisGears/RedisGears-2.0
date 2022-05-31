@@ -1,9 +1,9 @@
 use redis_module::{Context, RedisError, ThreadSafeContext};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
-    run_function_ctx::BackgroundRunFunctionCtxInterface,
-    run_function_ctx::RedisClientCtxInterface, run_function_ctx::RedisLogerCtxInterface,
-    run_function_ctx::ReplyCtxInterface, run_function_ctx::RunFunctionCtxInterface, CallResult,
+    run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
+    run_function_ctx::RedisLogerCtxInterface, run_function_ctx::ReplyCtxInterface,
+    run_function_ctx::RunFunctionCtxInterface, CallResult,
 };
 
 use crate::{get_ctx, redis_value_to_call_reply};

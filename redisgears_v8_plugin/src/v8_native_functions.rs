@@ -4,14 +4,13 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 };
 
 use v8_rs::v8::{
-    isolate::V8Isolate, v8_context_scope::V8ContextScope,
-    v8_object::V8LocalObject, v8_value::V8LocalValue,
-    v8_version,
+    isolate::V8Isolate, v8_context_scope::V8ContextScope, v8_object::V8LocalObject,
+    v8_value::V8LocalValue, v8_version,
 };
 
 use crate::v8_function_ctx::V8Function;
-use crate::v8_stream_ctx::V8StreamCtx;
 use crate::v8_script_ctx::V8ScriptCtx;
+use crate::v8_stream_ctx::V8StreamCtx;
 
 use std::cell::RefCell;
 use std::str;
@@ -223,7 +222,10 @@ pub(crate) fn get_redis_client(
     let redis_client_ref = Arc::clone(redis_client);
     client.set(
         ctx_scope,
-        &script_ctx.isolate.new_string("run_on_background").to_value(),
+        &script_ctx
+            .isolate
+            .new_string("run_on_background")
+            .to_value(),
         &ctx_scope
             .new_native_function(move |args, isolate, ctx_scope| {
                 if args.len() != 1 {
@@ -260,11 +262,8 @@ pub(crate) fn get_redis_client(
                     let ctx_scope = new_script_ctx_ref.ctx.enter();
                     let trycatch = new_script_ctx_ref.isolate.new_try_catch();
 
-                    let background_client = get_backgrounnd_client(
-                        &new_script_ctx_ref,
-                        &ctx_scope,
-                        bg_redis_client,
-                    );
+                    let background_client =
+                        get_backgrounnd_client(&new_script_ctx_ref, &ctx_scope, bg_redis_client);
                     let res = f
                         .as_local(&new_script_ctx_ref.isolate)
                         .call(&ctx_scope, Some(&[&background_client.to_value()]));
@@ -286,11 +285,15 @@ pub(crate) fn get_redis_client(
     client
 }
 
-pub(crate) fn initialize_globals(script_ctx: &Arc<V8ScriptCtx>, globals: &V8LocalObject, ctx_scope: &V8ContextScope) {
+pub(crate) fn initialize_globals(
+    script_ctx: &Arc<V8ScriptCtx>,
+    globals: &V8LocalObject,
+    ctx_scope: &V8ContextScope,
+) {
     let redis = script_ctx.isolate.new_object();
 
     let script_ctx_ref = Arc::clone(script_ctx);
-    redis.set(ctx_scope, 
+    redis.set(ctx_scope,
         &script_ctx.isolate.new_string("register_stream_consumer").to_value(), 
         &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
             if args.len() != 5 {
@@ -401,109 +404,140 @@ pub(crate) fn initialize_globals(script_ctx: &Arc<V8ScriptCtx>, globals: &V8Loca
             None
     }).to_value());
 
-    redis.set(ctx_scope,
+    redis.set(
+        ctx_scope,
         &script_ctx.isolate.new_string("v8_version").to_value(),
-        &ctx_scope.new_native_function(|_args, isolate, _curr_ctx_scope| {
-            let v = v8_version();
-            let v_v8_str = isolate.new_string(v);
-            Some(v_v8_str.to_value())
-    }).to_value());
+        &ctx_scope
+            .new_native_function(|_args, isolate, _curr_ctx_scope| {
+                let v = v8_version();
+                let v_v8_str = isolate.new_string(v);
+                Some(v_v8_str.to_value())
+            })
+            .to_value(),
+    );
 
-    redis.set(ctx_scope,
+    redis.set(
+        ctx_scope,
         &script_ctx.isolate.new_string("log").to_value(),
-        &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
-            if args.len() != 1 {
-                isolate.raise_exception_str("Wrong number of arguments to 'log' function");
-                return None;
-            }
+        &ctx_scope
+            .new_native_function(move |args, isolate, curr_ctx_scope| {
+                if args.len() != 1 {
+                    isolate.raise_exception_str("Wrong number of arguments to 'log' function");
+                    return None;
+                }
 
-            let msg = args.get(0);
-            if !msg.is_string() {
-                isolate.raise_exception_str("First argument to 'log' must be a string message");
-                return None;
-            }
+                let msg = args.get(0);
+                if !msg.is_string() {
+                    isolate.raise_exception_str("First argument to 'log' must be a string message");
+                    return None;
+                }
 
-            let msg_utf8 = msg.to_utf8(isolate).unwrap();
-            let load_ctx =
-                match curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0) {
+                let msg_utf8 = msg.to_utf8(isolate).unwrap();
+                let load_ctx = match curr_ctx_scope
+                    .get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0)
+                {
                     Some(r_c) => r_c,
                     None => {
                         isolate.raise_exception_str("Called 'log' function out of context");
                         return None;
                     }
                 };
-            load_ctx.log(msg_utf8.as_str());
-            None
-    }).to_value());
+                load_ctx.log(msg_utf8.as_str());
+                None
+            })
+            .to_value(),
+    );
 
-    globals.set(ctx_scope, &script_ctx.isolate.new_string("redis").to_value(), &redis.to_value());
+    globals.set(
+        ctx_scope,
+        &script_ctx.isolate.new_string("redis").to_value(),
+        &redis.to_value(),
+    );
 
     let script_ctx_ref = Arc::clone(script_ctx);
     globals.set(
         ctx_scope,
         &script_ctx.isolate.new_string("Promise").to_value(),
-        &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
-            if args.len() != 1 {
-                isolate.raise_exception_str("Wrong number of arguments to 'Promise' function");
-                return None;
-            }
-            
-            let function = args.get(0);
-            if !function.is_function() || function.is_async_function()  {
-                isolate.raise_exception_str("Bad argument to 'Promise' function");
-                return None;
-            }
-
-            let script_ctx_ref_resolve = Arc::clone(&script_ctx_ref);
-            let script_ctx_ref_reject = Arc::clone(&script_ctx_ref);
-            let resolver = curr_ctx_scope.new_resolver();
-            let promise = resolver.get_promise();
-            let resolver_resolve = Arc::new(resolver.to_value().persist(isolate));
-            let resolver_reject = Arc::clone(&resolver_resolve);
-
-            let resolve = curr_ctx_scope.new_native_function(move |args, isolate, _curr_ctx_scope| {
+        &ctx_scope
+            .new_native_function(move |args, isolate, curr_ctx_scope| {
                 if args.len() != 1 {
-                    isolate.raise_exception_str("Wrong number of arguments to 'resolve' function");
+                    isolate.raise_exception_str("Wrong number of arguments to 'Promise' function");
                     return None;
                 }
 
-                let res = args.get(0).persist(isolate);
-                let new_script_ctx_ref_resolve = Arc::clone(&script_ctx_ref_resolve);
-                let resolver_resolve = Arc::clone(&resolver_resolve);
-                (script_ctx_ref_resolve.run_on_background)(Box::new(move||{
-                    let _isolate_scope = new_script_ctx_ref_resolve.isolate.enter();
-                    let _isolate_scope = new_script_ctx_ref_resolve.isolate.new_handlers_scope();
-                    let ctx_scope = new_script_ctx_ref_resolve.ctx.enter();
-                    let _trycatch = new_script_ctx_ref_resolve.isolate.new_try_catch();
-                    let res = res.as_local(&new_script_ctx_ref_resolve.isolate);
-                    let resolver = resolver_resolve.as_local(&new_script_ctx_ref_resolve.isolate).as_resolver();
-                    resolver.resolve(&ctx_scope, &res);
-                }));
-                None
-            });
-
-            let reject = curr_ctx_scope.new_native_function(move |args, isolate, _curr_ctx_scope| {
-                if args.len() != 1 {
-                    isolate.raise_exception_str("Wrong number of arguments to 'resolve' function");
+                let function = args.get(0);
+                if !function.is_function() || function.is_async_function() {
+                    isolate.raise_exception_str("Bad argument to 'Promise' function");
                     return None;
                 }
 
-                let res = args.get(0).persist(isolate);
-                let new_script_ctx_ref_reject = Arc::clone(&script_ctx_ref_reject);
-                let resolver_reject = Arc::clone(&resolver_reject);
-                (script_ctx_ref_reject.run_on_background)(Box::new(move||{
-                    let _isolate_scope = new_script_ctx_ref_reject.isolate.enter();
-                    let _isolate_scope = new_script_ctx_ref_reject.isolate.new_handlers_scope();
-                    let ctx_scope = new_script_ctx_ref_reject.ctx.enter();
-                    let _trycatch = new_script_ctx_ref_reject.isolate.new_try_catch();
-                    let res = res.as_local(&new_script_ctx_ref_reject.isolate);
-                    let resolver = resolver_reject.as_local(&new_script_ctx_ref_reject.isolate).as_resolver();
-                    resolver.reject(&ctx_scope, &res);
-                }));
-                None
-            });
+                let script_ctx_ref_resolve = Arc::clone(&script_ctx_ref);
+                let script_ctx_ref_reject = Arc::clone(&script_ctx_ref);
+                let resolver = curr_ctx_scope.new_resolver();
+                let promise = resolver.get_promise();
+                let resolver_resolve = Arc::new(resolver.to_value().persist(isolate));
+                let resolver_reject = Arc::clone(&resolver_resolve);
 
-            let _ = function.call(curr_ctx_scope, Some(&[&resolve.to_value(), &reject.to_value()]));
-            Some(promise.to_value())
-    }).to_value());
+                let resolve =
+                    curr_ctx_scope.new_native_function(move |args, isolate, _curr_ctx_scope| {
+                        if args.len() != 1 {
+                            isolate.raise_exception_str(
+                                "Wrong number of arguments to 'resolve' function",
+                            );
+                            return None;
+                        }
+
+                        let res = args.get(0).persist(isolate);
+                        let new_script_ctx_ref_resolve = Arc::clone(&script_ctx_ref_resolve);
+                        let resolver_resolve = Arc::clone(&resolver_resolve);
+                        (script_ctx_ref_resolve.run_on_background)(Box::new(move || {
+                            let _isolate_scope = new_script_ctx_ref_resolve.isolate.enter();
+                            let _isolate_scope =
+                                new_script_ctx_ref_resolve.isolate.new_handlers_scope();
+                            let ctx_scope = new_script_ctx_ref_resolve.ctx.enter();
+                            let _trycatch = new_script_ctx_ref_resolve.isolate.new_try_catch();
+                            let res = res.as_local(&new_script_ctx_ref_resolve.isolate);
+                            let resolver = resolver_resolve
+                                .as_local(&new_script_ctx_ref_resolve.isolate)
+                                .as_resolver();
+                            resolver.resolve(&ctx_scope, &res);
+                        }));
+                        None
+                    });
+
+                let reject =
+                    curr_ctx_scope.new_native_function(move |args, isolate, _curr_ctx_scope| {
+                        if args.len() != 1 {
+                            isolate.raise_exception_str(
+                                "Wrong number of arguments to 'resolve' function",
+                            );
+                            return None;
+                        }
+
+                        let res = args.get(0).persist(isolate);
+                        let new_script_ctx_ref_reject = Arc::clone(&script_ctx_ref_reject);
+                        let resolver_reject = Arc::clone(&resolver_reject);
+                        (script_ctx_ref_reject.run_on_background)(Box::new(move || {
+                            let _isolate_scope = new_script_ctx_ref_reject.isolate.enter();
+                            let _isolate_scope =
+                                new_script_ctx_ref_reject.isolate.new_handlers_scope();
+                            let ctx_scope = new_script_ctx_ref_reject.ctx.enter();
+                            let _trycatch = new_script_ctx_ref_reject.isolate.new_try_catch();
+                            let res = res.as_local(&new_script_ctx_ref_reject.isolate);
+                            let resolver = resolver_reject
+                                .as_local(&new_script_ctx_ref_reject.isolate)
+                                .as_resolver();
+                            resolver.reject(&ctx_scope, &res);
+                        }));
+                        None
+                    });
+
+                let _ = function.call(
+                    curr_ctx_scope,
+                    Some(&[&resolve.to_value(), &reject.to_value()]),
+                );
+                Some(promise.to_value())
+            })
+            .to_value(),
+    );
 }

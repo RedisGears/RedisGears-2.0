@@ -1,7 +1,4 @@
-use v8_rs::v8::{
-    v8_value::V8LocalValue, v8_value::V8PersistValue,
-    v8_promise::V8PromiseState,
-};
+use v8_rs::v8::{v8_promise::V8PromiseState, v8_value::V8LocalValue, v8_value::V8PersistValue};
 
 use redisgears_plugin_api::redisgears_plugin_api::stream_ctx::{
     StreamCtxInterface, StreamProcessCtxInterface, StreamRecordAck, StreamRecordInterface,
@@ -78,7 +75,8 @@ impl V8StreamCtxInternals {
             })
             .map(|(f, v)| (f.unwrap(), v.unwrap()))
             .map(|(f, v)| {
-                self.script_ctx.isolate
+                self.script_ctx
+                    .isolate
                     .new_array(&[
                         &self.script_ctx.isolate.new_string(f).to_value(),
                         &self.script_ctx.isolate.new_string(v).to_value(),
@@ -88,7 +86,8 @@ impl V8StreamCtxInternals {
             .collect::<Vec<V8LocalValue>>();
 
         let val_v8_arr = self
-            .script_ctx.isolate
+            .script_ctx
+            .isolate
             .new_array(&vals.iter().collect::<Vec<&V8LocalValue>>());
 
         let stream_data = self.script_ctx.isolate.new_object();
@@ -126,7 +125,10 @@ impl V8StreamCtxInternals {
             Some(_) => StreamRecordAck::Ack,
             None => {
                 // todo: handle promise
-                let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
+                let error_utf8 = trycatch
+                    .get_exception()
+                    .to_utf8(&self.script_ctx.isolate)
+                    .unwrap();
                 StreamRecordAck::Nack(error_utf8.as_str().to_string())
             }
         })
@@ -139,7 +141,9 @@ impl V8StreamCtxInternals {
         redis_client: Box<dyn BackgroundRunFunctionCtxInterface>,
         ack_callback: Box<dyn FnOnce(StreamRecordAck) + Send>,
     ) {
-        let ack_callback = Arc::new(RefCell::new(V8StreamAckCtx{ack:Some(ack_callback)}));
+        let ack_callback = Arc::new(RefCell::new(V8StreamAckCtx {
+            ack: Some(ack_callback),
+        }));
         let res = {
             let _isolate_scope = self.script_ctx.isolate.enter();
             let _handlers_scope = self.script_ctx.isolate.new_handlers_scope();
@@ -165,7 +169,8 @@ impl V8StreamCtxInternals {
                 })
                 .map(|(f, v)| (f.unwrap(), v.unwrap()))
                 .map(|(f, v)| {
-                    self.script_ctx.isolate
+                    self.script_ctx
+                        .isolate
                         .new_array(&[
                             &self.script_ctx.isolate.new_string(f).to_value(),
                             &self.script_ctx.isolate.new_string(v).to_value(),
@@ -175,7 +180,8 @@ impl V8StreamCtxInternals {
                 .collect::<Vec<V8LocalValue>>();
 
             let val_v8_arr = self
-                .script_ctx.isolate
+                .script_ctx
+                .isolate
                 .new_array(&vals.iter().collect::<Vec<&V8LocalValue>>());
 
             let stream_data = self.script_ctx.isolate.new_object();
@@ -209,7 +215,8 @@ impl V8StreamCtxInternals {
                     if res.is_promise() {
                         let res = res.as_promise();
                         if res.state() == V8PromiseState::Rejected {
-                            let error_utf8 = res.get_result().to_utf8(&self.script_ctx.isolate).unwrap();
+                            let error_utf8 =
+                                res.get_result().to_utf8(&self.script_ctx.isolate).unwrap();
                             Some(StreamRecordAck::Nack(error_utf8.as_str().to_string()))
                         } else if res.state() == V8PromiseState::Fulfilled {
                             Some(StreamRecordAck::Ack)
@@ -219,7 +226,8 @@ impl V8StreamCtxInternals {
                             let resolve =
                                 ctx_scope.new_native_function(move |_args, isolate, _context| {
                                     let _unlocker = isolate.new_unlocker();
-                                    if let Some(ack) = ack_callback_resolve.borrow_mut().ack.take() {
+                                    if let Some(ack) = ack_callback_resolve.borrow_mut().ack.take()
+                                    {
                                         ack(StreamRecordAck::Ack);
                                     }
                                     None
@@ -238,13 +246,16 @@ impl V8StreamCtxInternals {
                             res.then(&ctx_scope, &resolve, &reject);
                             None
                         }
-                    }else {
+                    } else {
                         Some(StreamRecordAck::Ack)
                     }
                 }
                 None => {
                     // todo: hanlde promise
-                    let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
+                    let error_utf8 = trycatch
+                        .get_exception()
+                        .to_utf8(&self.script_ctx.isolate)
+                        .unwrap();
                     Some(StreamRecordAck::Nack(error_utf8.as_str().to_string()))
                 }
             }

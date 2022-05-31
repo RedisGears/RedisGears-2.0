@@ -21,7 +21,7 @@ impl V8ScriptCtx {
         isolate: V8Isolate,
         ctx: V8Context,
         script: V8PersistedScript,
-        run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>
+        run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
     ) -> V8ScriptCtx {
         V8ScriptCtx {
             isolate: isolate,
@@ -33,7 +33,7 @@ impl V8ScriptCtx {
 }
 
 pub(crate) struct V8LibraryCtx {
-    pub(crate) script_ctx: Arc<V8ScriptCtx>
+    pub(crate) script_ctx: Arc<V8ScriptCtx>,
 }
 
 impl LibraryCtxInterface for V8LibraryCtx {
@@ -49,15 +49,22 @@ impl LibraryCtxInterface for V8LibraryCtx {
         let script = self.script_ctx.script.to_local(&self.script_ctx.isolate);
 
         // set private content
-        self.script_ctx.ctx.set_private_data(0, Some(&load_library_ctx));
+        self.script_ctx
+            .ctx
+            .set_private_data(0, Some(&load_library_ctx));
 
         let res = script.run(&ctx_scope);
 
         // reset private data
-        self.script_ctx.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
+        self.script_ctx
+            .ctx
+            .set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
 
         if res.is_none() {
-            let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
+            let error_utf8 = trycatch
+                .get_exception()
+                .to_utf8(&self.script_ctx.isolate)
+                .unwrap();
             return Err(GearsApiError::Msg(format!(
                 "Failed evaluating module: {}",
                 error_utf8.as_str()

@@ -4,9 +4,7 @@ pub trait RedisLogerCtxInterface {
     fn log(&self, msg: &str);
 }
 
-pub trait RedisClientCtxInterface:
-    RedisLogerCtxInterface + Send + Sync
-{
+pub trait RedisClientCtxInterface: RedisLogerCtxInterface + Send + Sync {
     fn call(&self, command: &str, args: &[&str]) -> CallResult;
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface>;
     fn as_redis_client(&self) -> &dyn RedisClientCtxInterface;
@@ -22,9 +20,7 @@ pub trait ReplyCtxInterface: Send + Sync {
     fn as_client(&self) -> &dyn ReplyCtxInterface;
 }
 
-pub trait BackgroundRunFunctionCtxInterface:
-    RedisLogerCtxInterface + Send + Sync
-{
+pub trait BackgroundRunFunctionCtxInterface: RedisLogerCtxInterface + Send + Sync {
     fn lock<'a>(&'a self) -> Box<dyn RedisClientCtxInterface>;
 }
 

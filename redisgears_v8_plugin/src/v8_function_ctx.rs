@@ -5,8 +5,8 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 };
 
 use v8_rs::v8::{
-    isolate::V8Isolate, v8_context_scope::V8ContextScope,
-    v8_promise::V8PromiseState, v8_value::V8LocalValue, v8_value::V8PersistValue,
+    isolate::V8Isolate, v8_context_scope::V8ContextScope, v8_promise::V8PromiseState,
+    v8_value::V8LocalValue, v8_value::V8PersistValue,
 };
 
 use crate::v8_native_functions::{get_backgrounnd_client, RedisClient};
@@ -80,11 +80,8 @@ impl V8InternalFunction {
         let trycatch = self.script_ctx.isolate.new_try_catch();
 
         let res = {
-            let r_client = get_backgrounnd_client(
-                &self.script_ctx,
-                &ctx_scope,
-                redis_background_client,
-            );
+            let r_client =
+                get_backgrounnd_client(&self.script_ctx, &ctx_scope, redis_background_client);
             let args = {
                 let mut args = Vec::new();
                 args.push(r_client.to_value());
@@ -161,7 +158,10 @@ impl V8InternalFunction {
                 }
             }
             None => {
-                let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
+                let error_utf8 = trycatch
+                    .get_exception()
+                    .to_utf8(&self.script_ctx.isolate)
+                    .unwrap();
                 bg_client.reply_with_error(error_utf8.as_str());
             }
         }
@@ -215,7 +215,12 @@ impl V8InternalFunction {
                     {
                         let r = res.get_result();
                         if res.state() == V8PromiseState::Fulfilled {
-                            send_reply(&self.script_ctx.isolate, &ctx_scope, run_ctx.as_client(), r);
+                            send_reply(
+                                &self.script_ctx.isolate,
+                                &ctx_scope,
+                                run_ctx.as_client(),
+                                r,
+                            );
                         } else {
                             let r = r.to_utf8(&self.script_ctx.isolate).unwrap();
                             run_ctx.reply_with_error(r.as_str());
@@ -260,7 +265,10 @@ impl V8InternalFunction {
                 }
             }
             None => {
-                let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
+                let error_utf8 = trycatch
+                    .get_exception()
+                    .to_utf8(&self.script_ctx.isolate)
+                    .unwrap();
                 run_ctx.reply_with_error(error_utf8.as_str());
             }
         }
