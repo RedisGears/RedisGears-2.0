@@ -2,6 +2,7 @@ from common import gearsTest
 from common import TimeLimit
 from common import toDictionary
 from common import runUntil
+from common import runFor
 import time
 
 @gearsTest()
@@ -110,3 +111,18 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
     runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
     
     runUntil(env, 2, lambda: len(toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['pending_ids']))
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
+    env.assertEqual(3, len(res[0]['stream_registrations'][0]['streams'][0]['pending_ids']))
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runFor(3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
+    runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
+    env.assertEqual(2, res[0]['stream_registrations'][0]['streams'][0]['total_record_processed'])

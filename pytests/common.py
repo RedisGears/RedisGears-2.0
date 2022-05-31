@@ -21,6 +21,20 @@ def runUntil(env, expected_result, callback, sleep_time=0.1, timeout=1):
                 break
             time.sleep(sleep_time)
 
+def runFor(expected_result, callback, sleep_time=0.1, timeout=1):
+    try:
+        with TimeLimit(timeout):
+            while True:
+                res = callback()
+                if res == expected_result:
+                    time.sleep(sleep_time)
+                    continue
+                raise Exception("Failed, Expected '%s' got '%s'" % (str(expected_result), str(res)))
+    except Exception as e:
+        if str(e) != 'timeout':
+            raise e
+            
+
 class TimeLimit(object):
     """
     A context manager that fires a TimeExpired exception if it does not
