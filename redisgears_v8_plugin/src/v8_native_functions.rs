@@ -4,13 +4,14 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 };
 
 use v8_rs::v8::{
-    isolate::V8Isolate, v8_context::V8Context, v8_context_scope::V8ContextScope,
-    v8_object::V8LocalObject, v8_object_template::V8LocalObjectTemplate, v8_value::V8LocalValue,
+    isolate::V8Isolate, v8_context_scope::V8ContextScope,
+    v8_object::V8LocalObject, v8_value::V8LocalValue,
     v8_version,
 };
 
 use crate::v8_function_ctx::V8Function;
 use crate::v8_stream_ctx::V8StreamCtx;
+use crate::v8_script_ctx::V8ScriptCtx;
 
 use std::cell::RefCell;
 use std::str;
@@ -77,19 +78,17 @@ impl RedisClient {
 }
 
 pub(crate) fn get_backgrounnd_client(
-    isolate: &Arc<V8Isolate>,
-    ctx: &Arc<V8Context>,
+    script_ctx: &Arc<V8ScriptCtx>,
     ctx_scope: &V8ContextScope,
     redis_background_client: Box<dyn BackgroundRunFunctionCtxInterface>,
 ) -> V8LocalObject {
-    let bg_client = isolate.new_object();
+    let bg_client = script_ctx.isolate.new_object();
     let redis_background_client = Arc::new(redis_background_client);
     let redis_background_client_ref = Arc::clone(&redis_background_client);
-    let isolate_ref = Arc::clone(isolate);
-    let ctx_ref = Arc::clone(ctx);
+    let script_ctx_ref = Arc::clone(script_ctx);
     bg_client.set(
         ctx_scope,
-        &isolate.new_string("block").to_value(),
+        &script_ctx.isolate.new_string("block").to_value(),
         &ctx_scope
             .new_native_function(move |args, isolate, ctx_scope| {
                 if args.len() < 1 {
@@ -107,7 +106,7 @@ pub(crate) fn get_backgrounnd_client(
                 };
                 let r_client = Arc::new(RefCell::new(RedisClient::new()));
                 r_client.borrow_mut().set_client(redis_client);
-                let c = get_redis_client(&isolate_ref, &ctx_ref, ctx_scope, &r_client);
+                let c = get_redis_client(&script_ctx_ref, ctx_scope, &r_client);
                 let res = f.call(ctx_scope, Some(&[&c.to_value()]));
                 r_client.borrow_mut().make_invalid();
                 res
@@ -118,7 +117,7 @@ pub(crate) fn get_backgrounnd_client(
     let redis_background_client_ref = Arc::clone(&redis_background_client);
     bg_client.set(
         ctx_scope,
-        &isolate.new_string("log").to_value(),
+        &script_ctx.isolate.new_string("log").to_value(),
         &ctx_scope
             .new_native_function(move |args, isolate, _ctx_scope| {
                 if args.len() != 1 {
@@ -142,17 +141,16 @@ pub(crate) fn get_backgrounnd_client(
 }
 
 pub(crate) fn get_redis_client(
-    isolate: &Arc<V8Isolate>,
-    ctx: &Arc<V8Context>,
+    script_ctx: &Arc<V8ScriptCtx>,
     ctx_scope: &V8ContextScope,
     redis_client: &Arc<RefCell<RedisClient>>,
 ) -> V8LocalObject {
-    let client = isolate.new_object();
+    let client = script_ctx.isolate.new_object();
 
     let redis_client_ref = Arc::clone(redis_client);
     client.set(
         ctx_scope,
-        &isolate.new_string("call").to_value(),
+        &script_ctx.isolate.new_string("call").to_value(),
         &ctx_scope
             .new_native_function(move |args, isolate, ctx_scope| {
                 if args.len() < 1 {
@@ -194,7 +192,7 @@ pub(crate) fn get_redis_client(
     let redis_client_ref = Arc::clone(redis_client);
     client.set(
         ctx_scope,
-        &isolate.new_string("log").to_value(),
+        &script_ctx.isolate.new_string("log").to_value(),
         &ctx_scope
             .new_native_function(move |args, isolate, _ctx_scope| {
                 if args.len() != 1 {
@@ -221,12 +219,11 @@ pub(crate) fn get_redis_client(
             .to_value(),
     );
 
+    let script_ctx_ref = Arc::clone(script_ctx);
     let redis_client_ref = Arc::clone(redis_client);
-    let isolate_ref = Arc::clone(isolate);
-    let ctx_ref = Arc::clone(ctx);
     client.set(
         ctx_scope,
-        &isolate.new_string("run_on_background").to_value(),
+        &script_ctx.isolate.new_string("run_on_background").to_value(),
         &ctx_scope
             .new_native_function(move |args, isolate, ctx_scope| {
                 if args.len() != 1 {
@@ -253,46 +250,35 @@ pub(crate) fn get_redis_client(
                 }
                 let f = f.persist(isolate);
 
-                let isolate_ref = Arc::clone(&isolate_ref);
-                let ctx_ref = Arc::clone(&ctx_ref);
+                let new_script_ctx_ref = Arc::clone(&script_ctx_ref);
+                let resolver = ctx_scope.new_resolver();
+                let promise = resolver.get_promise();
+                let resolver = resolver.to_value().persist(isolate);
+                (script_ctx_ref.run_on_background)(Box::new(move || {
+                    let _isolate_scope = new_script_ctx_ref.isolate.enter();
+                    let _handlers_scope = new_script_ctx_ref.isolate.new_handlers_scope();
+                    let ctx_scope = new_script_ctx_ref.ctx.enter();
+                    let trycatch = new_script_ctx_ref.isolate.new_try_catch();
 
-                match redis_client_ref.borrow().client.as_ref() {
-                    Some(r_c) => {
-                        let resolver = ctx_scope.new_resolver();
-                        let promise = resolver.get_promise();
-                        let resolver = resolver.to_value().persist(isolate);
-                        r_c.run_on_backgrond(Box::new(move || {
-                            let _isolate_scope = isolate_ref.enter();
-                            let _handlers_scope = isolate_ref.new_handlers_scope();
-                            let ctx_scope = ctx_ref.enter();
-                            let trycatch = isolate_ref.new_try_catch();
+                    let background_client = get_backgrounnd_client(
+                        &new_script_ctx_ref,
+                        &ctx_scope,
+                        bg_redis_client,
+                    );
+                    let res = f
+                        .as_local(&new_script_ctx_ref.isolate)
+                        .call(&ctx_scope, Some(&[&background_client.to_value()]));
 
-                            let background_client = get_backgrounnd_client(
-                                &isolate_ref,
-                                &ctx_ref,
-                                &ctx_scope,
-                                bg_redis_client,
-                            );
-                            let res = f
-                                .as_local(&isolate_ref)
-                                .call(&ctx_scope, Some(&[&background_client.to_value()]));
-
-                            let resolver = resolver.as_local(&isolate_ref).as_resolver();
-                            match res {
-                                Some(r) => resolver.resolve(&ctx_scope, &r),
-                                None => {
-                                    let error_utf8 = trycatch.get_exception();
-                                    resolver.resolve(&ctx_scope, &error_utf8);
-                                }
-                            }
-                        }));
-                        Some(promise.to_value())
+                    let resolver = resolver.as_local(&new_script_ctx_ref.isolate).as_resolver();
+                    match res {
+                        Some(r) => resolver.resolve(&ctx_scope, &r),
+                        None => {
+                            let error_utf8 = trycatch.get_exception();
+                            resolver.resolve(&ctx_scope, &error_utf8);
+                        }
                     }
-                    None => {
-                        isolate.raise_exception_str("Used on invalid client");
-                        None
-                    }
-                }
+                }));
+                Some(promise.to_value())
             })
             .to_value(),
     );
@@ -300,152 +286,224 @@ pub(crate) fn get_redis_client(
     client
 }
 
-pub(crate) fn get_globals(isolate: &V8Isolate) -> V8LocalObjectTemplate {
-    let mut redis = isolate.new_object_template();
+pub(crate) fn initialize_globals(script_ctx: &Arc<V8ScriptCtx>, globals: &V8LocalObject, ctx_scope: &V8ContextScope) {
+    let redis = script_ctx.isolate.new_object();
 
-    redis.add_native_function(isolate, "register_stream_consumer", |args, isolate, curr_ctx_scope| {
-        if args.len() != 5 {
-            isolate.raise_exception_str("Wrong number of arguments to 'register_stream_consumer' function");
-            return None;
-        }
-
-        let consumer_name = args.get(0);
-        if !consumer_name.is_string() {
-            isolate.raise_exception_str("First argument to 'register_stream_consumer' must be a string representing the function name");
-            return None;
-        }
-        let registration_name_utf8 = consumer_name.to_utf8(isolate).unwrap();
-
-        let prefix = args.get(1);
-        if !prefix.is_string() {
-            isolate.raise_exception_str("Second argument to 'register_stream_consumer' must be a string representing the prefix");
-            return None;
-        }
-        let prefix_utf8 = prefix.to_utf8(isolate).unwrap();
-
-        let window = args.get(2);
-        if !window.is_long() {
-            isolate.raise_exception_str("Third argument to 'register_stream_consumer' must be a long representing the window size");
-            return None;
-        }
-        let window = window.get_long();
-
-        let trim = args.get(3);
-        if !trim.is_boolean() {
-            isolate.raise_exception_str("Dourth argument to 'register_stream_consumer' must be a boolean representing the trim option");
-            return None;
-        }
-        let trim = trim.get_boolean();
-
-        let function_callback = args.get(4);
-        if !function_callback.is_function() {
-            isolate.raise_exception_str("Fith argument to 'register_stream_consumer' must be a function");
-            return None;
-        }
-        let persisted_function = function_callback.persist(isolate);
-
-        let load_ctx = curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0);
-        if load_ctx.is_none() {
-            isolate.raise_exception_str("Called 'register_function' out of context");
-            return None;
-        }
-        let load_ctx = load_ctx.unwrap();
-        let ctx: &Arc<V8Context> = curr_ctx_scope.get_private_data_mut(1).unwrap();
-        let isolate: &Arc<V8Isolate> = curr_ctx_scope.get_private_data_mut(2).unwrap();
-
-        let v8_stream_ctx = V8StreamCtx::new(ctx, isolate, persisted_function, if function_callback.is_async_function() {true} else {false});
-        let res = load_ctx.register_stream_consumer(registration_name_utf8.as_str(), prefix_utf8.as_str(), Box::new(v8_stream_ctx), window as usize, trim);
-        if let Err(err) = res {
-            match err {
-                GearsApiError::Msg(s) => isolate.raise_exception_str(&s),
+    let script_ctx_ref = Arc::clone(script_ctx);
+    redis.set(ctx_scope, 
+        &script_ctx.isolate.new_string("register_stream_consumer").to_value(), 
+        &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
+            if args.len() != 5 {
+                isolate.raise_exception_str("Wrong number of arguments to 'register_stream_consumer' function");
+                return None;
             }
-            return None;
-        }
-        None
-    });
 
-    redis.add_native_function(isolate, "register_function", |args, isolate, curr_ctx_scope| {
-        if args.len() != 2 {
-            isolate.raise_exception_str("Wrong number of arguments to 'register_function' function");
-            return None;
-        }
-
-        let function_name = args.get(0);
-        if !function_name.is_string() {
-            isolate.raise_exception_str("First argument to 'register_function' must be a string representing the function name");
-            return None;
-        }
-        let function_name_utf8 = function_name.to_utf8(isolate).unwrap();
-
-        let function_callback = args.get(1);
-        if !function_callback.is_function() {
-            isolate.raise_exception_str("Second argument to 'register_function' must be a function");
-            return None;
-        }
-        let persisted_function = function_callback.persist(isolate);
-
-        let load_ctx = curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0);
-        if load_ctx.is_none() {
-            isolate.raise_exception_str("Called 'register_function' out of context");
-            return None;
-        }
-        let load_ctx = load_ctx.unwrap();
-        let ctx: &Arc<V8Context> = curr_ctx_scope.get_private_data_mut(1).unwrap();
-        let isolate: &Arc<V8Isolate> = curr_ctx_scope.get_private_data_mut(2).unwrap();
-        let c = Arc::new(RefCell::new(RedisClient::new()));
-        let redis_client = get_redis_client(isolate, ctx, curr_ctx_scope, &c);
-
-        let f = V8Function::new(ctx,
-            isolate,
-            persisted_function,
-            redis_client.to_value().persist(isolate),
-            &c,
-            function_callback.is_async_function()
-        );
-
-        let res = load_ctx.register_function(function_name_utf8.as_str(), Box::new(f));
-        if let Err(err) = res {
-            match err {
-                GearsApiError::Msg(s) => isolate.raise_exception_str(&s),
+            let consumer_name = args.get(0);
+            if !consumer_name.is_string() {
+                isolate.raise_exception_str("First argument to 'register_stream_consumer' must be a string representing the function name");
+                return None;
             }
-            return None;
-        }
-        None
-    });
+            let registration_name_utf8 = consumer_name.to_utf8(isolate).unwrap();
 
-    redis.add_native_function(isolate, "v8_version", |_args, isolate, _curr_ctx_scope| {
-        let v = v8_version();
-        let v_v8_str = isolate.new_string(v);
-        Some(v_v8_str.to_value())
-    });
+            let prefix = args.get(1);
+            if !prefix.is_string() {
+                isolate.raise_exception_str("Second argument to 'register_stream_consumer' must be a string representing the prefix");
+                return None;
+            }
+            let prefix_utf8 = prefix.to_utf8(isolate).unwrap();
 
-    redis.add_native_function(isolate, "log", |args, isolate, curr_ctx_scope| {
-        if args.len() != 1 {
-            isolate.raise_exception_str("Wrong number of arguments to 'log' function");
-            return None;
-        }
+            let window = args.get(2);
+            if !window.is_long() {
+                isolate.raise_exception_str("Third argument to 'register_stream_consumer' must be a long representing the window size");
+                return None;
+            }
+            let window = window.get_long();
 
-        let msg = args.get(0);
-        if !msg.is_string() {
-            isolate.raise_exception_str("First argument to 'log' must be a string message");
-            return None;
-        }
+            let trim = args.get(3);
+            if !trim.is_boolean() {
+                isolate.raise_exception_str("Dourth argument to 'register_stream_consumer' must be a boolean representing the trim option");
+                return None;
+            }
+            let trim = trim.get_boolean();
 
-        let msg_utf8 = msg.to_utf8(isolate).unwrap();
-        let load_ctx =
-            match curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0) {
-                Some(r_c) => r_c,
-                None => {
-                    isolate.raise_exception_str("Called 'log' function out of context");
+            let function_callback = args.get(4);
+            if !function_callback.is_function() {
+                isolate.raise_exception_str("Fith argument to 'register_stream_consumer' must be a function");
+                return None;
+            }
+            let persisted_function = function_callback.persist(isolate);
+
+            let load_ctx = curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0);
+            if load_ctx.is_none() {
+                isolate.raise_exception_str("Called 'register_function' out of context");
+                return None;
+            }
+            let load_ctx = load_ctx.unwrap();
+
+            let v8_stream_ctx = V8StreamCtx::new(persisted_function, &script_ctx_ref, if function_callback.is_async_function() {true} else {false});
+            let res = load_ctx.register_stream_consumer(registration_name_utf8.as_str(), prefix_utf8.as_str(), Box::new(v8_stream_ctx), window as usize, trim);
+            if let Err(err) = res {
+                match err {
+                    GearsApiError::Msg(s) => isolate.raise_exception_str(&s),
+                }
+                return None;
+            }
+            None
+    }).to_value());
+
+    let script_ctx_ref = Arc::clone(script_ctx);
+    redis.set(ctx_scope,
+        &script_ctx.isolate.new_string("register_function").to_value(),
+        &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
+            if args.len() != 2 {
+                isolate.raise_exception_str("Wrong number of arguments to 'register_function' function");
+                return None;
+            }
+
+            let function_name = args.get(0);
+            if !function_name.is_string() {
+                isolate.raise_exception_str("First argument to 'register_function' must be a string representing the function name");
+                return None;
+            }
+            let function_name_utf8 = function_name.to_utf8(isolate).unwrap();
+
+            let function_callback = args.get(1);
+            if !function_callback.is_function() {
+                isolate.raise_exception_str("Second argument to 'register_function' must be a function");
+                return None;
+            }
+            let persisted_function = function_callback.persist(isolate);
+
+            let load_ctx = curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0);
+            if load_ctx.is_none() {
+                isolate.raise_exception_str("Called 'register_function' out of context");
+                return None;
+            }
+            let load_ctx = load_ctx.unwrap();
+            let c = Arc::new(RefCell::new(RedisClient::new()));
+            let redis_client = get_redis_client(&script_ctx_ref, curr_ctx_scope, &c);
+
+            let f = V8Function::new(
+                &script_ctx_ref,
+                persisted_function,
+                redis_client.to_value().persist(isolate),
+                &c,
+                function_callback.is_async_function(),
+            );
+
+            let res = load_ctx.register_function(function_name_utf8.as_str(), Box::new(f));
+            if let Err(err) = res {
+                match err {
+                    GearsApiError::Msg(s) => isolate.raise_exception_str(&s),
+                }
+                return None;
+            }
+            None
+    }).to_value());
+
+    redis.set(ctx_scope,
+        &script_ctx.isolate.new_string("v8_version").to_value(),
+        &ctx_scope.new_native_function(|_args, isolate, _curr_ctx_scope| {
+            let v = v8_version();
+            let v_v8_str = isolate.new_string(v);
+            Some(v_v8_str.to_value())
+    }).to_value());
+
+    redis.set(ctx_scope,
+        &script_ctx.isolate.new_string("log").to_value(),
+        &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
+            if args.len() != 1 {
+                isolate.raise_exception_str("Wrong number of arguments to 'log' function");
+                return None;
+            }
+
+            let msg = args.get(0);
+            if !msg.is_string() {
+                isolate.raise_exception_str("First argument to 'log' must be a string message");
+                return None;
+            }
+
+            let msg_utf8 = msg.to_utf8(isolate).unwrap();
+            let load_ctx =
+                match curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0) {
+                    Some(r_c) => r_c,
+                    None => {
+                        isolate.raise_exception_str("Called 'log' function out of context");
+                        return None;
+                    }
+                };
+            load_ctx.log(msg_utf8.as_str());
+            None
+    }).to_value());
+
+    globals.set(ctx_scope, &script_ctx.isolate.new_string("redis").to_value(), &redis.to_value());
+
+    let script_ctx_ref = Arc::clone(script_ctx);
+    globals.set(
+        ctx_scope,
+        &script_ctx.isolate.new_string("Promise").to_value(),
+        &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
+            if args.len() != 1 {
+                isolate.raise_exception_str("Wrong number of arguments to 'Promise' function");
+                return None;
+            }
+            
+            let function = args.get(0);
+            if !function.is_function() || function.is_async_function()  {
+                isolate.raise_exception_str("Bad argument to 'Promise' function");
+                return None;
+            }
+
+            let script_ctx_ref_resolve = Arc::clone(&script_ctx_ref);
+            let script_ctx_ref_reject = Arc::clone(&script_ctx_ref);
+            let resolver = curr_ctx_scope.new_resolver();
+            let promise = resolver.get_promise();
+            let resolver_resolve = Arc::new(resolver.to_value().persist(isolate));
+            let resolver_reject = Arc::clone(&resolver_resolve);
+
+            let resolve = curr_ctx_scope.new_native_function(move |args, isolate, _curr_ctx_scope| {
+                if args.len() != 1 {
+                    isolate.raise_exception_str("Wrong number of arguments to 'resolve' function");
                     return None;
                 }
-            };
-        load_ctx.log(msg_utf8.as_str());
-        None
-    });
 
-    let mut globals = isolate.new_object_template();
-    globals.add_object(isolate, "redis", &redis);
+                let res = args.get(0).persist(isolate);
+                let new_script_ctx_ref_resolve = Arc::clone(&script_ctx_ref_resolve);
+                let resolver_resolve = Arc::clone(&resolver_resolve);
+                (script_ctx_ref_resolve.run_on_background)(Box::new(move||{
+                    let _isolate_scope = new_script_ctx_ref_resolve.isolate.enter();
+                    let _isolate_scope = new_script_ctx_ref_resolve.isolate.new_handlers_scope();
+                    let ctx_scope = new_script_ctx_ref_resolve.ctx.enter();
+                    let _trycatch = new_script_ctx_ref_resolve.isolate.new_try_catch();
+                    let res = res.as_local(&new_script_ctx_ref_resolve.isolate);
+                    let resolver = resolver_resolve.as_local(&new_script_ctx_ref_resolve.isolate).as_resolver();
+                    resolver.resolve(&ctx_scope, &res);
+                }));
+                None
+            });
 
-    return globals;
+            let reject = curr_ctx_scope.new_native_function(move |args, isolate, _curr_ctx_scope| {
+                if args.len() != 1 {
+                    isolate.raise_exception_str("Wrong number of arguments to 'resolve' function");
+                    return None;
+                }
+
+                let res = args.get(0).persist(isolate);
+                let new_script_ctx_ref_reject = Arc::clone(&script_ctx_ref_reject);
+                let resolver_reject = Arc::clone(&resolver_reject);
+                (script_ctx_ref_reject.run_on_background)(Box::new(move||{
+                    let _isolate_scope = new_script_ctx_ref_reject.isolate.enter();
+                    let _isolate_scope = new_script_ctx_ref_reject.isolate.new_handlers_scope();
+                    let ctx_scope = new_script_ctx_ref_reject.ctx.enter();
+                    let _trycatch = new_script_ctx_ref_reject.isolate.new_try_catch();
+                    let res = res.as_local(&new_script_ctx_ref_reject.isolate);
+                    let resolver = resolver_reject.as_local(&new_script_ctx_ref_reject.isolate).as_resolver();
+                    resolver.reject(&ctx_scope, &res);
+                }));
+                None
+            });
+
+            let _ = function.call(curr_ctx_scope, Some(&[&resolve.to_value(), &reject.to_value()]));
+            Some(promise.to_value())
+    }).to_value());
 }

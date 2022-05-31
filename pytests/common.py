@@ -1,5 +1,25 @@
 import signal
+import time
 from RLTest import Env, Defaults
+
+def toDictionary(res, max_recursion):
+    if  max_recursion == 0:
+        return res
+    if type(res) != list:
+        return res
+    if len(res) == 0:
+        return res
+    if type(res[0]) == list:
+        # nested list, keep it as list
+        return [toDictionary(r, max_recursion - 1) for r in res]
+    return {res[i]: toDictionary(res[i + 1], max_recursion - 1) for i in range(0, len(res), 2)}
+
+def runUntil(env, expected_result, callback, sleep_time=0.1, timeout=1):
+    with TimeLimit(timeout, env, "Failed waiting for callback to return '%s'" % str(expected_result)):
+        while True:
+            if callback() == expected_result:
+                break
+            time.sleep(sleep_time)
 
 class TimeLimit(object):
     """
@@ -90,6 +110,8 @@ def gearsTest(skipTest=False,
             version = env.cmd('info', 'server')['redis_version']
             if skipOnRedis6 and '6.0' in version:
                 env.skip()
+            if test_function.__doc__ is not None:
+                env.expect('RG.FUNCTION', 'LOAD', test_function.__doc__).equal('OK')
             test_function(env)
             if len(env.assertionFailedSummary) > 0:
                 extractInfoOnfailure(env, 'before_cleanups')

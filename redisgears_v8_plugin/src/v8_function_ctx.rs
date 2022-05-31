@@ -5,11 +5,12 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 };
 
 use v8_rs::v8::{
-    isolate::V8Isolate, v8_context::V8Context, v8_context_scope::V8ContextScope,
+    isolate::V8Isolate, v8_context_scope::V8ContextScope,
     v8_promise::V8PromiseState, v8_value::V8LocalValue, v8_value::V8PersistValue,
 };
 
 use crate::v8_native_functions::{get_backgrounnd_client, RedisClient};
+use crate::v8_script_ctx::V8ScriptCtx;
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -29,8 +30,7 @@ impl BackgroundClientHolder {
 pub struct V8InternalFunction {
     persisted_client: V8PersistValue,
     persisted_function: V8PersistValue,
-    ctx: Arc<V8Context>,
-    isolate: Arc<V8Isolate>,
+    script_ctx: Arc<V8ScriptCtx>,
 }
 
 fn send_reply(
@@ -62,6 +62,8 @@ fn send_reply(
             send_reply(isolate, ctx_scope, client, key);
             send_reply(isolate, ctx_scope, client, obj);
         }
+    } else {
+        client.reply_with_bulk_string(val.to_utf8(isolate).unwrap().as_str());
     }
 }
 
@@ -72,15 +74,14 @@ impl V8InternalFunction {
         bg_client: Box<dyn ReplyCtxInterface>,
         redis_background_client: Box<dyn BackgroundRunFunctionCtxInterface>,
     ) -> FunctionCallResult {
-        let _isolate_scope = self.isolate.enter();
-        let _handlers_scope = self.isolate.new_handlers_scope();
-        let ctx_scope = self.ctx.enter();
-        let trycatch = self.isolate.new_try_catch();
+        let _isolate_scope = self.script_ctx.isolate.enter();
+        let _handlers_scope = self.script_ctx.isolate.new_handlers_scope();
+        let ctx_scope = self.script_ctx.ctx.enter();
+        let trycatch = self.script_ctx.isolate.new_try_catch();
 
         let res = {
             let r_client = get_backgrounnd_client(
-                &self.isolate,
-                &self.ctx,
+                &self.script_ctx,
                 &ctx_scope,
                 redis_background_client,
             );
@@ -88,7 +89,7 @@ impl V8InternalFunction {
                 let mut args = Vec::new();
                 args.push(r_client.to_value());
                 for arg in command_args.iter() {
-                    args.push(self.isolate.new_string(arg).to_value());
+                    args.push(self.script_ctx.isolate.new_string(arg).to_value());
                 }
                 Some(args)
             };
@@ -100,7 +101,7 @@ impl V8InternalFunction {
 
             let res = self
                 .persisted_function
-                .as_local(self.isolate.as_ref())
+                .as_local(&self.script_ctx.isolate)
                 .call(
                     &ctx_scope,
                     args_ref.as_ref().map_or(None, |v| Some(v.as_slice())),
@@ -117,9 +118,9 @@ impl V8InternalFunction {
                     {
                         let r = res.get_result();
                         if res.state() == V8PromiseState::Fulfilled {
-                            send_reply(&self.isolate, &ctx_scope, bg_client.as_ref(), r);
+                            send_reply(&self.script_ctx.isolate, &ctx_scope, bg_client.as_ref(), r);
                         } else {
-                            let r = r.to_utf8(&self.isolate).unwrap();
+                            let r = r.to_utf8(&self.script_ctx.isolate).unwrap();
                             bg_client.reply_with_error(r.as_str());
                         }
                     } else {
@@ -156,11 +157,11 @@ impl V8InternalFunction {
                         return FunctionCallResult::Hold;
                     }
                 } else {
-                    send_reply(&self.isolate, &ctx_scope, bg_client.as_ref(), r);
+                    send_reply(&self.script_ctx.isolate, &ctx_scope, bg_client.as_ref(), r);
                 }
             }
             None => {
-                let error_utf8 = trycatch.get_exception().to_utf8(&self.isolate).unwrap();
+                let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
                 bg_client.reply_with_error(error_utf8.as_str());
             }
         }
@@ -168,15 +169,15 @@ impl V8InternalFunction {
     }
 
     fn call_sync(&self, run_ctx: &mut dyn RunFunctionCtxInterface) -> FunctionCallResult {
-        let _isolate_scope = self.isolate.enter();
-        let _handlers_scope = self.isolate.new_handlers_scope();
-        let ctx_scope = self.ctx.enter();
-        let trycatch = self.isolate.new_try_catch();
+        let _isolate_scope = self.script_ctx.isolate.enter();
+        let _handlers_scope = self.script_ctx.isolate.new_handlers_scope();
+        let ctx_scope = self.script_ctx.ctx.enter();
+        let trycatch = self.script_ctx.isolate.new_try_catch();
 
         let res = {
             let args = {
                 let mut args = Vec::new();
-                args.push(self.persisted_client.as_local(&self.isolate));
+                args.push(self.persisted_client.as_local(&self.script_ctx.isolate));
                 while let Some(a) = run_ctx.next_arg() {
                     let arg = match str::from_utf8(a) {
                         Ok(s) => s,
@@ -185,7 +186,7 @@ impl V8InternalFunction {
                             return FunctionCallResult::Done;
                         }
                     };
-                    args.push(self.isolate.new_string(arg).to_value());
+                    args.push(self.script_ctx.isolate.new_string(arg).to_value());
                 }
                 Some(args)
             };
@@ -197,7 +198,7 @@ impl V8InternalFunction {
 
             let res = self
                 .persisted_function
-                .as_local(self.isolate.as_ref())
+                .as_local(&self.script_ctx.isolate)
                 .call(
                     &ctx_scope,
                     args_ref.as_ref().map_or(None, |v| Some(v.as_slice())),
@@ -214,9 +215,9 @@ impl V8InternalFunction {
                     {
                         let r = res.get_result();
                         if res.state() == V8PromiseState::Fulfilled {
-                            send_reply(&self.isolate, &ctx_scope, run_ctx.as_client(), r);
+                            send_reply(&self.script_ctx.isolate, &ctx_scope, run_ctx.as_client(), r);
                         } else {
-                            let r = r.to_utf8(&self.isolate).unwrap();
+                            let r = r.to_utf8(&self.script_ctx.isolate).unwrap();
                             run_ctx.reply_with_error(r.as_str());
                         }
                     } else {
@@ -255,11 +256,11 @@ impl V8InternalFunction {
                         return FunctionCallResult::Hold;
                     }
                 } else {
-                    send_reply(&self.isolate, &ctx_scope, run_ctx.as_client(), r);
+                    send_reply(&self.script_ctx.isolate, &ctx_scope, run_ctx.as_client(), r);
                 }
             }
             None => {
-                let error_utf8 = trycatch.get_exception().to_utf8(&self.isolate).unwrap();
+                let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
                 run_ctx.reply_with_error(error_utf8.as_str());
             }
         }
@@ -275,8 +276,7 @@ pub struct V8Function {
 
 impl V8Function {
     pub(crate) fn new(
-        ctx: &Arc<V8Context>,
-        isolate: &Arc<V8Isolate>,
+        script_ctx: &Arc<V8ScriptCtx>,
         persisted_function: V8PersistValue,
         persisted_client: V8PersistValue,
         client: &Arc<RefCell<RedisClient>>,
@@ -284,8 +284,7 @@ impl V8Function {
     ) -> V8Function {
         V8Function {
             inner_function: Arc::new(V8InternalFunction {
-                ctx: Arc::clone(ctx),
-                isolate: Arc::clone(isolate),
+                script_ctx: Arc::clone(script_ctx),
                 persisted_function: persisted_function,
                 persisted_client: persisted_client,
             }),
@@ -313,7 +312,7 @@ impl FunctionCtxInterface for V8Function {
             }
             let bg_client = run_ctx.get_background_client();
             let bg_redis_client = run_ctx.get_redis_client().get_background_redis_client();
-            run_ctx.run_on_backgrond(Box::new(move || {
+            (self.inner_function.script_ctx.run_on_background)(Box::new(move || {
                 inner_function.call_async(args, bg_client, bg_redis_client);
             }));
             FunctionCallResult::Done

@@ -2,12 +2,11 @@ use redis_module::{Context, RedisError, ThreadSafeContext};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface,
-    run_function_ctx::RedisBackgroundExecuterCtxInterface,
     run_function_ctx::RedisClientCtxInterface, run_function_ctx::RedisLogerCtxInterface,
     run_function_ctx::ReplyCtxInterface, run_function_ctx::RunFunctionCtxInterface, CallResult,
 };
 
-use crate::{get_ctx, get_thread_pool, redis_value_to_call_reply};
+use crate::{get_ctx, redis_value_to_call_reply};
 
 use std::slice::Iter;
 
@@ -21,14 +20,6 @@ unsafe impl Send for RedisClient {}
 impl RedisLogerCtxInterface for RedisClient {
     fn log(&self, msg: &str) {
         get_ctx().log_notice(msg);
-    }
-}
-
-impl RedisBackgroundExecuterCtxInterface for RedisClient {
-    fn run_on_backgrond(&self, func: Box<dyn FnOnce() + Send>) {
-        get_thread_pool().execute(move || {
-            func();
-        });
     }
 }
 
@@ -98,14 +89,6 @@ impl<'a> RedisLogerCtxInterface for RunCtx<'a> {
 
 unsafe impl<'a> Sync for RunCtx<'a> {}
 unsafe impl<'a> Send for RunCtx<'a> {}
-
-impl<'a> RedisBackgroundExecuterCtxInterface for RunCtx<'a> {
-    fn run_on_backgrond(&self, func: Box<dyn FnOnce() + Send>) {
-        get_thread_pool().execute(move || {
-            func();
-        });
-    }
-}
 
 impl<'a> RunFunctionCtxInterface for RunCtx<'a> {
     fn next_arg(&mut self) -> Option<&[u8]> {

@@ -7,12 +7,13 @@ use v8_rs::v8::{
     v8_script::V8PersistedScript,
 };
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub(crate) struct V8ScriptCtx {
-    script: V8PersistedScript,
-    ctx: Rc<V8Context>,
-    isolate: Rc<V8Isolate>,
+    pub(crate) script: V8PersistedScript,
+    pub(crate) ctx: V8Context,
+    pub(crate) isolate: V8Isolate,
+    pub(crate) run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
 }
 
 impl V8ScriptCtx {
@@ -20,44 +21,43 @@ impl V8ScriptCtx {
         isolate: V8Isolate,
         ctx: V8Context,
         script: V8PersistedScript,
+        run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>
     ) -> V8ScriptCtx {
         V8ScriptCtx {
-            isolate: Rc::new(isolate),
-            ctx: Rc::new(ctx),
+            isolate: isolate,
+            ctx: ctx,
             script: script,
+            run_on_background: run_on_background,
         }
     }
 }
 
-impl LibraryCtxInterface for V8ScriptCtx {
+pub(crate) struct V8LibraryCtx {
+    pub(crate) script_ctx: Arc<V8ScriptCtx>
+}
+
+impl LibraryCtxInterface for V8LibraryCtx {
     fn load_library(
         &self,
         load_library_ctx: &mut dyn LoadLibraryCtxInterface,
     ) -> Result<(), GearsApiError> {
-        let _isolate_scope = self.isolate.enter();
-        let _handlers_scope = self.isolate.new_handlers_scope();
-        let ctx_scope = self.ctx.enter();
-        let trycatch = self.isolate.new_try_catch();
+        let _isolate_scope = self.script_ctx.isolate.enter();
+        let _handlers_scope = self.script_ctx.isolate.new_handlers_scope();
+        let ctx_scope = self.script_ctx.ctx.enter();
+        let trycatch = self.script_ctx.isolate.new_try_catch();
 
-        let script = self.script.to_local(&self.isolate);
+        let script = self.script_ctx.script.to_local(&self.script_ctx.isolate);
 
         // set private content
-        self.ctx.set_private_data(0, Some(&load_library_ctx));
-        self.ctx.set_private_data(1, Some(&self.ctx));
-        self.ctx.set_private_data(2, Some(&self.isolate));
+        self.script_ctx.ctx.set_private_data(0, Some(&load_library_ctx));
 
         let res = script.run(&ctx_scope);
 
         // reset private data
-        self.ctx
-            .set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
-        self.ctx
-            .set_private_data::<&mut dyn LoadLibraryCtxInterface>(1, None);
-        self.ctx
-            .set_private_data::<&mut dyn LoadLibraryCtxInterface>(2, None);
+        self.script_ctx.ctx.set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
 
         if res.is_none() {
-            let error_utf8 = trycatch.get_exception().to_utf8(&self.isolate).unwrap();
+            let error_utf8 = trycatch.get_exception().to_utf8(&self.script_ctx.isolate).unwrap();
             return Err(GearsApiError::Msg(format!(
                 "Failed evaluating module: {}",
                 error_utf8.as_str()
@@ -68,7 +68,7 @@ impl LibraryCtxInterface for V8ScriptCtx {
             let promise = res.as_promise();
             if promise.state() == V8PromiseState::Rejected {
                 let error = promise.get_result();
-                let error_utf8 = error.to_utf8(&self.isolate).unwrap();
+                let error_utf8 = error.to_utf8(&self.script_ctx.isolate).unwrap();
                 return Err(GearsApiError::Msg(format!(
                     "Failed evaluating module: {}",
                     error_utf8.as_str()

@@ -619,7 +619,9 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         )));
     }
     let backend = backend.unwrap();
-    let lib_ctx = backend.compile_library(code);
+    let lib_ctx = backend.compile_library(code, Box::new(|callback|{
+        get_thread_pool().execute(callback);
+    }));
     let lib_ctx = match lib_ctx {
         Err(e) => match e {
             GearsApiError::Msg(s) => {
@@ -668,7 +670,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         }
         return ret;
     }
-    if gears_library.functions.len() == 0 {
+    if gears_library.functions.len() == 0 && gears_library.stream_consumers.len() == 0 {
         if let Some(old_lib) = gears_library.old_lib.take() {
             for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
                 let stream_data = gears_library.stream_consumers.get(&name).unwrap();
@@ -679,7 +681,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
             }
             libraries.insert(gears_library.meta_data.name, *old_lib);
         }
-        return Err(RedisError::Str("No function was registered"));
+        return Err(RedisError::Str("No function nor registrations was registered"));
     }
     gears_library.old_lib = None;
     libraries.insert(
