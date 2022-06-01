@@ -23,5 +23,4 @@ pub trait LoadLibraryCtxInterface {
         window: usize,
         trim: bool,
     ) -> Result<(), GearsApiError>;
-    fn log(&self, msg: &str);
 }

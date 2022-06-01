@@ -55,6 +55,7 @@ impl BackendCtxInterface for V8Backend {
         &self,
         blob: &str,
         run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
+        log: Box<dyn Fn(&str) + Send + Sync>,
     ) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError> {
         let isolate = V8Isolate::new();
 
@@ -83,7 +84,13 @@ impl BackendCtxInterface for V8Backend {
                 let script = script.persist(&isolate);
                 (ctx, script)
             };
-            let script_ctx = Arc::new(V8ScriptCtx::new(isolate, ctx, script, run_on_background));
+            let script_ctx = Arc::new(V8ScriptCtx::new(
+                isolate,
+                ctx,
+                script,
+                run_on_background,
+                log,
+            ));
             {
                 let _isolate_scope = script_ctx.isolate.enter();
                 let _handlers_scope = script_ctx.isolate.new_handlers_scope();

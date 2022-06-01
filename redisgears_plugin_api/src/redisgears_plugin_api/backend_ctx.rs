@@ -9,5 +9,6 @@ pub trait BackendCtxInterface {
         &self,
         code: &str,
         run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
+        log: Box<dyn Fn(&str) + Send + Sync>,
     ) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError>;
 }

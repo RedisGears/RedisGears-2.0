@@ -113,29 +113,6 @@ pub(crate) fn get_backgrounnd_client(
             .to_value(),
     );
 
-    let redis_background_client_ref = Arc::clone(&redis_background_client);
-    bg_client.set(
-        ctx_scope,
-        &script_ctx.isolate.new_string("log").to_value(),
-        &ctx_scope
-            .new_native_function(move |args, isolate, _ctx_scope| {
-                if args.len() != 1 {
-                    isolate.raise_exception_str("Wrong number of arguments to 'log' function");
-                    return None;
-                }
-
-                let msg = args.get(0);
-                if !msg.is_string() {
-                    isolate.raise_exception_str("First argument to 'log' must be a string message");
-                    return None;
-                }
-
-                let msg_utf8 = msg.to_utf8(isolate).unwrap();
-                redis_background_client_ref.log(msg_utf8.as_str());
-                None
-            })
-            .to_value(),
-    );
     bg_client
 }
 
@@ -184,36 +161,6 @@ pub(crate) fn get_redis_client(
                 };
 
                 call_result_to_js_object(isolate, ctx_scope, res)
-            })
-            .to_value(),
-    );
-
-    let redis_client_ref = Arc::clone(redis_client);
-    client.set(
-        ctx_scope,
-        &script_ctx.isolate.new_string("log").to_value(),
-        &ctx_scope
-            .new_native_function(move |args, isolate, _ctx_scope| {
-                if args.len() != 1 {
-                    isolate.raise_exception_str("Wrong number of arguments to 'log' function");
-                    return None;
-                }
-
-                let msg = args.get(0);
-                if !msg.is_string() {
-                    isolate.raise_exception_str("First argument to 'log' must be a string message");
-                    return None;
-                }
-
-                let msg_utf8 = msg.to_utf8(isolate).unwrap();
-                match redis_client_ref.borrow().client.as_ref() {
-                    Some(r_c) => r_c.log(msg_utf8.as_str()),
-                    None => {
-                        isolate.raise_exception_str("Used on invalid client");
-                        return None;
-                    }
-                };
-                None
             })
             .to_value(),
     );
@@ -416,11 +363,12 @@ pub(crate) fn initialize_globals(
             .to_value(),
     );
 
+    let script_ctx_ref = Arc::clone(script_ctx);
     redis.set(
         ctx_scope,
         &script_ctx.isolate.new_string("log").to_value(),
         &ctx_scope
-            .new_native_function(move |args, isolate, curr_ctx_scope| {
+            .new_native_function(move |args, isolate, _curr_ctx_scope| {
                 if args.len() != 1 {
                     isolate.raise_exception_str("Wrong number of arguments to 'log' function");
                     return None;
@@ -433,16 +381,7 @@ pub(crate) fn initialize_globals(
                 }
 
                 let msg_utf8 = msg.to_utf8(isolate).unwrap();
-                let load_ctx = match curr_ctx_scope
-                    .get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0)
-                {
-                    Some(r_c) => r_c,
-                    None => {
-                        isolate.raise_exception_str("Called 'log' function out of context");
-                        return None;
-                    }
-                };
-                load_ctx.log(msg_utf8.as_str());
+                (script_ctx_ref.log)(msg_utf8.as_str());
                 None
             })
             .to_value(),

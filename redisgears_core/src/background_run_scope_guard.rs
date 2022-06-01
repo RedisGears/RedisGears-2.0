@@ -2,7 +2,7 @@ use redis_module::{context::thread_safe::ContextGuard, Context, RedisError};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
-    run_function_ctx::RedisLogerCtxInterface, CallResult,
+    CallResult,
 };
 
 use crate::{background_run_ctx::BackgroundRunCtx, redis_value_to_call_reply};
@@ -10,12 +10,6 @@ use crate::{background_run_ctx::BackgroundRunCtx, redis_value_to_call_reply};
 pub(crate) struct BackgroundRunScopeGuardCtx<'a> {
     pub(crate) _ctx_guard: ContextGuard,
     pub(crate) ctx: &'a Context,
-}
-
-impl<'a> RedisLogerCtxInterface for BackgroundRunScopeGuardCtx<'a> {
-    fn log(&self, msg: &str) {
-        self.ctx.log_notice(msg);
-    }
 }
 
 unsafe impl<'a> Sync for BackgroundRunScopeGuardCtx<'a> {}

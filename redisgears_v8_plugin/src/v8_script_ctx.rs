@@ -14,6 +14,7 @@ pub(crate) struct V8ScriptCtx {
     pub(crate) ctx: V8Context,
     pub(crate) isolate: V8Isolate,
     pub(crate) run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
+    pub(crate) log: Box<dyn Fn(&str) + Send + Sync>,
 }
 
 impl V8ScriptCtx {
@@ -22,12 +23,14 @@ impl V8ScriptCtx {
         ctx: V8Context,
         script: V8PersistedScript,
         run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
+        log: Box<dyn Fn(&str) + Send + Sync>,
     ) -> V8ScriptCtx {
         V8ScriptCtx {
             isolate: isolate,
             ctx: ctx,
             script: script,
             run_on_background: run_on_background,
+            log: log,
         }
     }
 }

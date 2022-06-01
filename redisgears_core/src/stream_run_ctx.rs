@@ -1,23 +1,16 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
-    run_function_ctx::RedisLogerCtxInterface, stream_ctx::StreamCtxInterface,
-    stream_ctx::StreamProcessCtxInterface, stream_ctx::StreamRecordAck,
-    stream_ctx::StreamRecordInterface,
+    stream_ctx::StreamCtxInterface, stream_ctx::StreamProcessCtxInterface,
+    stream_ctx::StreamRecordAck, stream_ctx::StreamRecordInterface,
 };
 
 use redis_module::{raw::RedisModuleStreamID, stream::StreamRecord, ThreadSafeContext};
 
-use crate::{background_run_ctx::BackgroundRunCtx, get_ctx, get_thread_pool, run_ctx::RedisClient};
+use crate::{background_run_ctx::BackgroundRunCtx, get_thread_pool, run_ctx::RedisClient};
 
 use crate::stream_reader::{StreamConsumer, StreamReaderAck};
 
 pub(crate) struct StreamRunCtx;
-
-impl RedisLogerCtxInterface for StreamRunCtx {
-    fn log(&self, msg: &str) {
-        get_ctx().log_notice(msg);
-    }
-}
 
 impl StreamProcessCtxInterface for StreamRunCtx {
     fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface> {

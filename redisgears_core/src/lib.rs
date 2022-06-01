@@ -163,10 +163,6 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             .insert(name.to_string(), stream_registration);
         Ok(())
     }
-
-    fn log(&self, msg: &str) {
-        get_ctx().log_notice(msg);
-    }
 }
 
 struct GlobalCtx {
@@ -623,6 +619,9 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         code,
         Box::new(|callback| {
             get_thread_pool().execute(callback);
+        }),
+        Box::new(|msg| {
+            get_ctx().log_notice(msg);
         }),
     );
     let lib_ctx = match lib_ctx {

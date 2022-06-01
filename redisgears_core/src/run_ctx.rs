@@ -2,8 +2,7 @@ use redis_module::{Context, RedisError, ThreadSafeContext};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
-    run_function_ctx::RedisLogerCtxInterface, run_function_ctx::ReplyCtxInterface,
-    run_function_ctx::RunFunctionCtxInterface, CallResult,
+    run_function_ctx::ReplyCtxInterface, run_function_ctx::RunFunctionCtxInterface, CallResult,
 };
 
 use crate::{get_ctx, redis_value_to_call_reply};
@@ -16,12 +15,6 @@ pub(crate) struct RedisClient {}
 
 unsafe impl Sync for RedisClient {}
 unsafe impl Send for RedisClient {}
-
-impl RedisLogerCtxInterface for RedisClient {
-    fn log(&self, msg: &str) {
-        get_ctx().log_notice(msg);
-    }
-}
 
 impl RedisClientCtxInterface for RedisClient {
     fn call(&self, command: &str, args: &[&str]) -> CallResult {
@@ -78,12 +71,6 @@ impl<'a> ReplyCtxInterface for RunCtx<'a> {
 
     fn as_client(&self) -> &dyn ReplyCtxInterface {
         self
-    }
-}
-
-impl<'a> RedisLogerCtxInterface for RunCtx<'a> {
-    fn log(&self, msg: &str) {
-        get_ctx().log_notice(msg);
     }
 }
 

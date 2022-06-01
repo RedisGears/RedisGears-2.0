@@ -1,8 +1,7 @@
 use crate::redisgears_plugin_api::run_function_ctx::BackgroundRunFunctionCtxInterface;
 use crate::redisgears_plugin_api::run_function_ctx::RedisClientCtxInterface;
-use crate::redisgears_plugin_api::run_function_ctx::RedisLogerCtxInterface;
 
-pub trait StreamProcessCtxInterface: RedisLogerCtxInterface {
+pub trait StreamProcessCtxInterface {
     fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface>;
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface>;
     fn go_to_backgrond(&self, func: Box<dyn FnOnce() + Send>);
