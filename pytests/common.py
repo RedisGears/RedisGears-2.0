@@ -2,7 +2,7 @@ import signal
 import time
 from RLTest import Env, Defaults
 
-def toDictionary(res, max_recursion):
+def toDictionary(res, max_recursion=1000):
     if  max_recursion == 0:
         return res
     if type(res) != list:

@@ -126,3 +126,57 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
 
     res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
     env.assertEqual(2, res[0]['stream_registrations'][0]['streams'][0]['total_record_processed'])
+
+@gearsTest(envArgs={'useSlaves': True})
+def testStreamWithReplication(env):
+    """#!js name=lib
+var promises = [];
+redis.register_function("num_pending", function(){
+    return promises.length;
+})
+
+redis.register_function("continue", function(){
+    if (promises.length == 0) {
+        throw "No pending records"
+    }
+    p = promises[0]
+    promises.shift()
+    p[1]('continue')
+    id = p[0].id;
+    return id[0].toString() + "-" + id[1].toString()
+})
+
+redis.register_stream_consumer("consumer", "stream", 3, true, async function(client, data){
+    return await new Promise((resolve, reject) => {
+        promises.push([data,resolve]);
+    });
+})
+    """
+    slave_conn = env.getSlaveConnection()
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
+    id_to_read_from = res[0]['stream_registrations'][0]['streams'][0]['id_to_read_from']
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal(id_to_read_from)
+    runUntil(env, 1, lambda: len(toDictionary(slave_conn.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams']))
+    env.assertEqual(id_to_read_from, toDictionary(slave_conn.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['id_to_read_from'])
+
+    # add 2 more record to the stream
+    id1 = env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    id2 = env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+
+    runUntil(env, 2, lambda: slave_conn.execute_command('xlen', 'stream:1'))
+
+    # Turn slave to master
+    slave_conn.execute_command('slaveof', 'no', 'one')
+    runUntil(1, 2, lambda: slave_conn.execute_command('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+    def continue_function():
+        try:
+            return slave_conn.execute_command('RG.FUNCTION', 'CALL', 'lib', 'continue')
+        except Exception as e:
+            return str(e)
+    runUntil(1, id1, continue_function)
+    runUntil(1, id2, continue_function)
