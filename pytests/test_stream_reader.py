@@ -5,6 +5,18 @@ from common import runUntil
 from common import runFor
 import time
 
+'''
+todo:
+1. tests for upgrade/delete library (continue from the same id and finishes the pending ids)
+2. tests for delete the stream while processes
+3. tests for flushall while processes
+4. tests for multiple consumers on the same stream
+   a. each one gets all the data
+   b. data is trimmed only when everyone finished processing it
+5. multiple streams for consumer
+6. RDB save and load continues from the same id
+'''
+
 @gearsTest()
 def testBasicStreamReader(env):
     """#!js name=lib
@@ -172,11 +184,11 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(cli
 
     # Turn slave to master
     slave_conn.execute_command('slaveof', 'no', 'one')
-    runUntil(1, 2, lambda: slave_conn.execute_command('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+    runUntil(env, 2, lambda: slave_conn.execute_command('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
     def continue_function():
         try:
             return slave_conn.execute_command('RG.FUNCTION', 'CALL', 'lib', 'continue')
         except Exception as e:
             return str(e)
-    runUntil(1, id1, continue_function)
-    runUntil(1, id2, continue_function)
+    runUntil(env, id1, continue_function)
+    runUntil(env, id2, continue_function)

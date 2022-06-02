@@ -1,6 +1,12 @@
 from common import gearsTest
 from common import toDictionary
 
+'''
+todo:
+1. tests for rdb save and load
+2. tests for block and go to background
+'''
+
 @gearsTest()
 def testBasicJSInvocation(env):
     """#!js name=foo
