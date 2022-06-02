@@ -166,6 +166,8 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(cli
     """
     slave_conn = env.getSlaveConnection()
 
+    env.expect('WAIT', '1', '5000').equal(1)
+
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
 
