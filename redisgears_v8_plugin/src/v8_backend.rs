@@ -1,5 +1,6 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    backend_ctx::BackendCtxInterface, load_library_ctx::LibraryCtxInterface, GearsApiError,
+    backend_ctx::BackendCtxInterface, load_library_ctx::LibraryCtxInterface, CallResult,
+    GearsApiError,
 };
 
 use crate::v8_script_ctx::V8ScriptCtx;
@@ -13,13 +14,14 @@ use crate::v8_script_ctx::V8LibraryCtx;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::str;
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
-struct MyAllocator {
+struct Globals {
     allocator: Option<&'static dyn GlobalAlloc>,
+    log: Option<Box<dyn Fn(&str) + 'static>>,
 }
 
-unsafe impl GlobalAlloc for MyAllocator {
+unsafe impl GlobalAlloc for Globals {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match self.allocator.as_ref() {
             Some(a) => a.alloc(layout),
@@ -36,23 +38,54 @@ unsafe impl GlobalAlloc for MyAllocator {
 }
 
 #[global_allocator]
-static mut GLOBAL: MyAllocator = MyAllocator { allocator: None };
+static mut GLOBAL: Globals = Globals {
+    allocator: None,
+    log: None,
+};
 
-pub(crate) struct V8Backend;
+pub(crate) fn log(msg: &str) {
+    unsafe { (GLOBAL.log.as_ref().unwrap())(msg) };
+}
+
+pub(crate) struct V8Backend {
+    pub(crate) script_ctx_vec: Vec<Weak<V8ScriptCtx>>,
+}
+
+impl V8Backend {
+    fn isolates_gc(&mut self) {
+        let indexes = self
+            .script_ctx_vec
+            .iter()
+            .enumerate()
+            .filter(|(_i, v)| v.strong_count() == 0)
+            .map(|(i, _v)| i)
+            .collect::<Vec<usize>>();
+        for i in indexes.iter().rev() {
+            self.script_ctx_vec.swap_remove(*i);
+        }
+    }
+}
 
 impl BackendCtxInterface for V8Backend {
     fn get_name(&self) -> &'static str {
         "js"
     }
 
-    fn initialize(&self, allocator: &'static dyn GlobalAlloc) -> Result<(), GearsApiError> {
-        unsafe { GLOBAL.allocator = Some(allocator) }
+    fn initialize(
+        &self,
+        allocator: &'static dyn GlobalAlloc,
+        log: Box<dyn Fn(&str) + 'static>,
+    ) -> Result<(), GearsApiError> {
+        unsafe {
+            GLOBAL.allocator = Some(allocator);
+            GLOBAL.log = Some(log);
+        }
         v8_init(); /* Initializing v8 */
         Ok(())
     }
 
     fn compile_library(
-        &self,
+        &mut self,
         blob: &str,
         run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
         log: Box<dyn Fn(&str) + Send + Sync>,
@@ -91,6 +124,11 @@ impl BackendCtxInterface for V8Backend {
                 run_on_background,
                 log,
             ));
+            self.script_ctx_vec.push(Arc::downgrade(&script_ctx));
+            if self.script_ctx_vec.len() > 100 {
+                // let try to do some gc
+                self.isolates_gc();
+            }
             {
                 let _isolate_scope = script_ctx.isolate.enter();
                 let _handlers_scope = script_ctx.isolate.new_handlers_scope();
@@ -105,5 +143,48 @@ impl BackendCtxInterface for V8Backend {
         Ok(Box::new(V8LibraryCtx {
             script_ctx: script_ctx,
         }))
+    }
+
+    fn debug(&mut self, args: &[&str]) -> Result<CallResult, GearsApiError> {
+        let mut args = args.iter();
+        let sub_command = args
+            .next()
+            .map_or(
+                Err(GearsApiError::Msg(
+                    "Subcommand was not provided".to_string(),
+                )),
+                |v| Ok(v),
+            )?
+            .to_lowercase();
+        match sub_command.as_ref() {
+            "isolates_stats" => {
+                let active = self
+                    .script_ctx_vec
+                    .iter()
+                    .filter(|v| v.strong_count() > 0)
+                    .collect::<Vec<&Weak<V8ScriptCtx>>>()
+                    .len() as i64;
+                let not_active = self
+                    .script_ctx_vec
+                    .iter()
+                    .filter(|v| v.strong_count() == 0)
+                    .collect::<Vec<&Weak<V8ScriptCtx>>>()
+                    .len() as i64;
+                Ok(CallResult::Array(vec![
+                    CallResult::BulkStr("active".to_string()),
+                    CallResult::Long(active),
+                    CallResult::BulkStr("not_active".to_string()),
+                    CallResult::Long(not_active),
+                ]))
+            }
+            "isolates_gc" => {
+                self.isolates_gc();
+                Ok(CallResult::SimpleStr("OK".to_string()))
+            }
+            _ => Err(GearsApiError::Msg(format!(
+                "Unknown subcommand '{}'",
+                sub_command
+            ))),
+        }
     }
 }

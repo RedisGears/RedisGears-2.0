@@ -165,7 +165,7 @@ pub(crate) fn get_redis_client(
             .to_value(),
     );
 
-    let script_ctx_ref = Arc::clone(script_ctx);
+    let script_ctx_ref = Arc::downgrade(script_ctx);
     let redis_client_ref = Arc::clone(redis_client);
     client.set(
         ctx_scope,
@@ -199,6 +199,13 @@ pub(crate) fn get_redis_client(
                 }
                 let f = f.persist(isolate);
 
+                let script_ctx_ref = match script_ctx_ref.upgrade() {
+                    Some(s) => s,
+                    None => {
+                        isolate.raise_exception_str("Use of invalid function context");
+                        return None;
+                    }
+                };
                 let new_script_ctx_ref = Arc::clone(&script_ctx_ref);
                 let resolver = ctx_scope.new_resolver();
                 let promise = resolver.get_promise();
@@ -239,7 +246,7 @@ pub(crate) fn initialize_globals(
 ) {
     let redis = script_ctx.isolate.new_object();
 
-    let script_ctx_ref = Arc::clone(script_ctx);
+    let script_ctx_ref = Arc::downgrade(script_ctx);
     redis.set(ctx_scope,
         &script_ctx.isolate.new_string("register_stream_consumer").to_value(), 
         &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
@@ -290,6 +297,13 @@ pub(crate) fn initialize_globals(
             }
             let load_ctx = load_ctx.unwrap();
 
+            let script_ctx_ref = match script_ctx_ref.upgrade() {
+                Some(s) => s,
+                None => {
+                    isolate.raise_exception_str("Use of uninitialize script context");
+                    return None;
+                }
+            };
             let v8_stream_ctx = V8StreamCtx::new(persisted_function, &script_ctx_ref, if function_callback.is_async_function() {true} else {false});
             let res = load_ctx.register_stream_consumer(registration_name_utf8.as_str(), prefix_utf8.as_str(), Box::new(v8_stream_ctx), window as usize, trim);
             if let Err(err) = res {
@@ -301,7 +315,7 @@ pub(crate) fn initialize_globals(
             None
     }).to_value());
 
-    let script_ctx_ref = Arc::clone(script_ctx);
+    let script_ctx_ref = Arc::downgrade(script_ctx);
     redis.set(ctx_scope,
         &script_ctx.isolate.new_string("register_function").to_value(),
         &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
@@ -329,6 +343,15 @@ pub(crate) fn initialize_globals(
                 isolate.raise_exception_str("Called 'register_function' out of context");
                 return None;
             }
+
+            let script_ctx_ref = match script_ctx_ref.upgrade() {
+                Some(s) => s,
+                None => {
+                    isolate.raise_exception_str("Use of uninitialize script context");
+                    return None;
+                }
+            };
+
             let load_ctx = load_ctx.unwrap();
             let c = Arc::new(RefCell::new(RedisClient::new()));
             let redis_client = get_redis_client(&script_ctx_ref, curr_ctx_scope, &c);
@@ -363,7 +386,7 @@ pub(crate) fn initialize_globals(
             .to_value(),
     );
 
-    let script_ctx_ref = Arc::clone(script_ctx);
+    let script_ctx_ref = Arc::downgrade(script_ctx);
     redis.set(
         ctx_scope,
         &script_ctx.isolate.new_string("log").to_value(),
@@ -380,6 +403,14 @@ pub(crate) fn initialize_globals(
                     return None;
                 }
 
+                let script_ctx_ref = match script_ctx_ref.upgrade() {
+                    Some(s) => s,
+                    None => {
+                        isolate.raise_exception_str("Use of uninitialize script context");
+                        return None;
+                    }
+                };
+
                 let msg_utf8 = msg.to_utf8(isolate).unwrap();
                 (script_ctx_ref.log)(msg_utf8.as_str());
                 None
@@ -393,7 +424,7 @@ pub(crate) fn initialize_globals(
         &redis.to_value(),
     );
 
-    let script_ctx_ref = Arc::clone(script_ctx);
+    let script_ctx_ref = Arc::downgrade(script_ctx);
     globals.set(
         ctx_scope,
         &script_ctx.isolate.new_string("Promise").to_value(),
@@ -409,6 +440,14 @@ pub(crate) fn initialize_globals(
                     isolate.raise_exception_str("Bad argument to 'Promise' function");
                     return None;
                 }
+
+                let script_ctx_ref = match script_ctx_ref.upgrade() {
+                    Some(s) => s,
+                    None => {
+                        isolate.raise_exception_str("Use of uninitialize script context");
+                        return None;
+                    }
+                };
 
                 let script_ctx_ref_resolve = Arc::clone(&script_ctx_ref);
                 let script_ctx_ref_reject = Arc::clone(&script_ctx_ref);

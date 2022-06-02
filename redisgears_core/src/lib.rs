@@ -193,6 +193,10 @@ fn get_backends() -> &'static HashMap<String, Box<dyn BackendCtxInterface>> {
     &get_globals().backends
 }
 
+fn get_backends_mut() -> &'static mut HashMap<String, Box<dyn BackendCtxInterface>> {
+    &mut get_globals_mut().backends
+}
+
 fn get_libraries() -> &'static HashMap<String, GearsLibrary> {
     &get_globals().libraries
 }
@@ -283,7 +287,10 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                 ctx.log_warning(&format!("Backend {} already exists", name));
                 return Status::Err;
             }
-            if let Err(e) = backend.initialize(&redis_module::ALLOC) {
+            if let Err(e) = backend.initialize(
+                &redis_module::ALLOC,
+                Box::new(|msg| get_ctx().log_notice(msg)),
+            ) {
                 ctx.log_warning(&format!("Failed loading {} backend, {}", name, e.get_msg()));
                 return Status::Err;
             }
@@ -401,6 +408,56 @@ fn function_del_command(
     }
 }
 
+fn function_call_result_to_redis_result(res: CallResult) -> RedisValue {
+    match res {
+        CallResult::Long(l) => RedisValue::Integer(l),
+        CallResult::BulkStr(s) => RedisValue::BulkString(s),
+        CallResult::SimpleStr(s) => RedisValue::SimpleString(s),
+        CallResult::Null => RedisValue::Null,
+        CallResult::Double(d) => RedisValue::Float(d),
+        CallResult::Error(s) => RedisValue::SimpleString(s),
+        CallResult::Array(arr) => RedisValue::Array(
+            arr.into_iter()
+                .map(|v| function_call_result_to_redis_result(v))
+                .collect::<Vec<RedisValue>>(),
+        ),
+    }
+}
+
+fn function_debug_command(
+    _ctx: &Context,
+    mut args: Skip<IntoIter<redis_module::RedisString>>,
+) -> RedisResult {
+    let backend_name = args.next_arg()?.try_as_str()?;
+    let backend = get_backends_mut().get_mut(backend_name).map_or(
+        Err(RedisError::String(format!(
+            "Backend '{}' does not exists",
+            backend_name
+        ))),
+        |v| Ok(v),
+    )?;
+    let mut has_errors = false;
+    let args = args
+        .map(|v| {
+            let res = v.try_as_str();
+            if res.is_err() {
+                has_errors = true;
+            }
+            res
+        })
+        .collect::<Vec<Result<&str, RedisError>>>();
+    if has_errors {
+        return Err(RedisError::Str("Failed converting arguments to string"));
+    }
+    let args = args.into_iter().map(|v| v.unwrap()).collect::<Vec<&str>>();
+    let res = backend.debug(args.as_slice());
+    match res {
+        Ok(res) => Ok(function_call_result_to_redis_result(res)),
+        Err(e) => match e {
+            GearsApiError::Msg(msg) => Err(RedisError::String(msg)),
+        },
+    }
+}
 fn function_list_command(
     _ctx: &Context,
     mut args: Skip<IntoIter<redis_module::RedisString>>,
@@ -607,7 +664,7 @@ fn function_list_command(
 pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult {
     let meta_data = library_extract_matadata(code)?;
     let backend_name = meta_data.engine.as_str();
-    let backend = get_backends().get(backend_name);
+    let backend = get_backends_mut().get_mut(backend_name);
     if backend.is_none() {
         return Err(RedisError::String(format!(
             "Unknown backend {}",
@@ -740,6 +797,7 @@ fn function_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         "call" => function_call_command(ctx, args),
         "list" => function_list_command(ctx, args),
         "del" => function_del_command(ctx, args),
+        "debug" => function_debug_command(ctx, args),
         _ => Err(RedisError::String(format!(
             "Unknown subcommand {}",
             sub_command

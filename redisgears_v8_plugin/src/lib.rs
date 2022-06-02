@@ -11,5 +11,7 @@ use crate::v8_backend::V8Backend;
 #[no_mangle]
 #[allow(improper_ctypes_definitions)]
 pub extern "C" fn initialize_plugin() -> *mut dyn BackendCtxInterface {
-    Box::into_raw(Box::new(V8Backend))
+    Box::into_raw(Box::new(V8Backend {
+        script_ctx_vec: Vec::new(),
+    }))
 }
