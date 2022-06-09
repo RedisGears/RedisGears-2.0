@@ -1,5 +1,6 @@
 import signal
 import time
+import unittest
 from RLTest import Env, Defaults
 
 def toDictionary(res, max_recursion=1000):
@@ -114,7 +115,7 @@ def gearsTest(skipTest=False,
             if skipCallback is not None:
                 if skipCallback():
                     raise unittest.SkipTest()
-            env = Env(testName = test_function.__name__, decodeResponses=decodeResponses, **envArgs)
+            env = Env(testName = test_function.__name__, decodeResponses=decodeResponses, enableDebugCommand=True, **envArgs)
             if env.isCluster():
                 # make sure cluster will not turn to failed state and we will not be 
                 # able to execute commands on shards, on slow envs, run with valgrind,

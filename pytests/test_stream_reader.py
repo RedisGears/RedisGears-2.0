@@ -8,13 +8,6 @@ import time
 '''
 todo:
 1. tests for upgrade/delete library (continue from the same id and finishes the pending ids)
-2. tests for delete the stream while processes
-3. tests for flushall while processes
-4. tests for multiple consumers on the same stream
-   a. each one gets all the data
-   b. data is trimmed only when everyone finished processing it
-5. multiple streams for consumer
-6. RDB save and load continues from the same id
 '''
 
 @gearsTest()
@@ -194,3 +187,216 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(cli
             return str(e)
     runUntil(env, id1, continue_function)
     runUntil(env, id2, continue_function)
+
+
+@gearsTest()
+def testStreamDeletoin(env):
+    """#!js name=lib
+var promises = [];
+redis.register_function("num_pending", function(){
+    return promises.length;
+})
+
+redis.register_function("continue", function(){
+    if (promises.length == 0) {
+        throw "No pending records"
+    }
+    promises[0]('continue');
+    promises.shift()
+    return "OK"
+})
+
+redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
+    return await new Promise((resolve, reject) => {
+        promises.push(resolve);
+    });
+})
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'num_pending').equal(0)
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').error().contains('No pending records')
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+    
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.expect('del', 'stream:1').equal(1)
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
+    runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
+    runUntil(env, 0, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    res = env.cmd('RG.FUNCTION', 'LIST', 'vvv')
+    env.assertEqual(0, len(toDictionary(res, 6)[0]['stream_registrations'][0]['streams']))
+
+@gearsTest()
+def testFlushall(env):
+    """#!js name=lib
+var promises = [];
+redis.register_function("num_pending", function(){
+    return promises.length;
+})
+
+redis.register_function("continue", function(){
+    if (promises.length == 0) {
+        throw "No pending records"
+    }
+    promises[0]('continue');
+    promises.shift()
+    return "OK"
+})
+
+redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
+    return await new Promise((resolve, reject) => {
+        promises.push(resolve);
+    });
+})
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'num_pending').equal(0)
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').error().contains('No pending records')
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+    
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.expect('flushall').equal(True)
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
+    runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
+    runUntil(env, 0, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
+
+    res = env.cmd('RG.FUNCTION', 'LIST', 'vvv')
+    env.assertEqual(0, len(toDictionary(res, 6)[0]['stream_registrations'][0]['streams']))
+
+@gearsTest()
+def testMultipleConsumers(env):
+    script = """#!js name=%s
+var promises = [];
+redis.register_function("num_pending", function(){
+    return promises.length;
+})
+
+redis.register_function("continue", function(){
+    if (promises.length == 0) {
+        throw "No pending records"
+    }
+    promises[0]('continue');
+    promises.shift()
+    return "OK"
+})
+
+redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
+    return await new Promise((resolve, reject) => {
+        promises.push(resolve);
+    });
+})
+    """
+    env.expect('RG.FUNCTION', 'LOAD', script % 'lib1').equal('OK')
+    env.expect('RG.FUNCTION', 'LOAD', script % 'lib2').equal('OK')
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib1', 'num_pending'))
+    runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib2', 'num_pending'))
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib1', 'num_pending'))
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib2', 'num_pending'))
+
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib1', 'num_pending'))
+    runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib2', 'num_pending'))
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib1', 'continue').equal('OK')
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib1', 'num_pending'))
+    runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib2', 'num_pending'))
+    runFor(3, lambda: env.cmd('XLEN', 'stream:1')) # make sure not trimming
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib2', 'continue').equal('OK')
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib1', 'num_pending'))
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib2', 'num_pending'))
+    runUntil(env, 2, lambda: env.cmd('XLEN', 'stream:1'))
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib1', 'continue').equal('OK')
+    env.expect('RG.FUNCTION', 'CALL', 'lib1', 'continue').equal('OK')
+    runUntil(env, 0, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib1', 'num_pending'))
+    runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib2', 'num_pending'))
+    runFor(2, lambda: env.cmd('XLEN', 'stream:1')) # make sure not trimming
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib2', 'continue').equal('OK')
+    env.expect('RG.FUNCTION', 'CALL', 'lib2', 'continue').equal('OK')
+    runUntil(env, 0, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib1', 'num_pending'))
+    runUntil(env, 0, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib2', 'num_pending'))
+    runUntil(env, 0, lambda: env.cmd('XLEN', 'stream:1'))
+
+@gearsTest()
+def testMultipleStreamsForConsumer(env):
+    """#!js name=lib
+var streams = [];
+
+redis.register_function("get_stream", function(){
+    if (streams.length == 0) {
+        throw "No streams"
+    }
+    let name = streams[0];
+    streams.shift();
+    return name
+})
+
+redis.register_stream_consumer("consumer", "stream", 1, true, async function(client, data){
+    streams.push(data.stream_name)
+})
+    """
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').error().contains('No streams')
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:2', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:2', '*', 'foo', 'bar')
+
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:1')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:2')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:1')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:2')
+
+# skip untill RLTest will be upgraded to support debug command
+@gearsTest(skipTest=True)
+def testRDBSaveAndLoad(env):
+    """#!js name=lib
+
+redis.register_stream_consumer("consumer", "stream", 1, false, async function(client, data){
+    redis.log(data.id);
+})
+    """
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+
+    runUntil(env, 4, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['total_record_processed'])
+    id_to_read_from1 = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['id_to_read_from']
+
+    env.expect('DEBUG', 'RELOAD').equal('OK')
+
+    id_to_read_from2 = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['id_to_read_from']
+
+    env.assertEqual(id_to_read_from1, id_to_read_from2)
+
