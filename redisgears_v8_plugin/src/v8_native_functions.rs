@@ -210,7 +210,7 @@ pub(crate) fn get_redis_client(
                 let resolver = ctx_scope.new_resolver();
                 let promise = resolver.get_promise();
                 let resolver = resolver.to_value().persist(isolate);
-                (script_ctx_ref.run_on_background)(Box::new(move || {
+                script_ctx_ref.compiled_library_api.run_on_background(Box::new(move || {
                     let _isolate_scope = new_script_ctx_ref.isolate.enter();
                     let _handlers_scope = new_script_ctx_ref.isolate.new_handlers_scope();
                     let ctx_scope = new_script_ctx_ref.ctx.enter();
@@ -405,7 +405,7 @@ pub(crate) fn initialize_globals(
 
                 let msg_utf8 = msg.to_utf8(isolate).unwrap();
                 match script_ctx_ref.upgrade() {
-                    Some(s) => (s.log)(msg_utf8.as_str()),
+                    Some(s) => s.compiled_library_api.log(msg_utf8.as_str()),
                     None => crate::v8_backend::log(msg_utf8.as_str()), /* do not abort logs */
                 }
                 None
@@ -463,7 +463,7 @@ pub(crate) fn initialize_globals(
                         let res = args.get(0).persist(isolate);
                         let new_script_ctx_ref_resolve = Arc::clone(&script_ctx_ref_resolve);
                         let resolver_resolve = Arc::clone(&resolver_resolve);
-                        (script_ctx_ref_resolve.run_on_background)(Box::new(move || {
+                        script_ctx_ref_resolve.compiled_library_api.run_on_background(Box::new(move || {
                             let _isolate_scope = new_script_ctx_ref_resolve.isolate.enter();
                             let _isolate_scope =
                                 new_script_ctx_ref_resolve.isolate.new_handlers_scope();
@@ -490,7 +490,7 @@ pub(crate) fn initialize_globals(
                         let res = args.get(0).persist(isolate);
                         let new_script_ctx_ref_reject = Arc::clone(&script_ctx_ref_reject);
                         let resolver_reject = Arc::clone(&resolver_reject);
-                        (script_ctx_ref_reject.run_on_background)(Box::new(move || {
+                        script_ctx_ref_reject.compiled_library_api.run_on_background(Box::new(move || {
                             let _isolate_scope = new_script_ctx_ref_reject.isolate.enter();
                             let _isolate_scope =
                                 new_script_ctx_ref_reject.isolate.new_handlers_scope();

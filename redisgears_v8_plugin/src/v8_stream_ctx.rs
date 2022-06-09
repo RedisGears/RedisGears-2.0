@@ -281,7 +281,7 @@ impl StreamCtxInterface for V8StreamCtx {
             let internals = Arc::clone(&self.internals);
             let stream_name = stream_name.to_string();
             let bg_redis_client = run_ctx.get_background_redis_client();
-            (self.internals.script_ctx.run_on_background)(Box::new(move || {
+            self.internals.script_ctx.compiled_library_api.run_on_background(Box::new(move || {
                 internals.process_record_internal_async(
                     &stream_name.to_string(),
                     record,

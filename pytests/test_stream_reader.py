@@ -372,13 +372,13 @@ redis.register_stream_consumer("consumer", "stream", 1, true, async function(cli
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     env.cmd('xadd', 'stream:2', '*', 'foo', 'bar')
 
-    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:1')
-    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:2')
-    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:1')
-    env.expect('RG.FUNCTION', 'CALL', 'lib', 'get_stream').equal('stream:2')
+    runUntil(env, 'stream:1', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'))
+    runUntil(env, 'stream:2', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'))
+    runUntil(env, 'stream:1', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'))
+    runUntil(env, 'stream:2', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'))
 
 # skip untill RLTest will be upgraded to support debug command
-@gearsTest(skipTest=True)
+@gearsTest()
 def testRDBSaveAndLoad(env):
     """#!js name=lib
 

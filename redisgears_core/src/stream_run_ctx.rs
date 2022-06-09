@@ -6,7 +6,7 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 
 use redis_module::{raw::RedisModuleStreamID, stream::StreamRecord, ThreadSafeContext};
 
-use crate::{background_run_ctx::BackgroundRunCtx, get_thread_pool, run_ctx::RedisClient};
+use crate::{background_run_ctx::BackgroundRunCtx, run_ctx::RedisClient};
 
 use crate::stream_reader::{StreamConsumer, StreamReaderAck};
 
@@ -19,12 +19,6 @@ impl StreamProcessCtxInterface for StreamRunCtx {
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
         Box::new(BackgroundRunCtx {})
-    }
-
-    fn go_to_backgrond(&self, func: Box<dyn FnOnce() + Send>) {
-        get_thread_pool().execute(move || {
-            func();
-        });
     }
 }
 

@@ -1,5 +1,6 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
     load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface, GearsApiError,
+    backend_ctx::CompiledLibraryInterface,
 };
 
 use v8_rs::v8::{
@@ -13,8 +14,7 @@ pub(crate) struct V8ScriptCtx {
     pub(crate) script: V8PersistedScript,
     pub(crate) ctx: V8Context,
     pub(crate) isolate: V8Isolate,
-    pub(crate) run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
-    pub(crate) log: Box<dyn Fn(&str) + Send + Sync>,
+    pub(crate) compiled_library_api: Box<dyn CompiledLibraryInterface + Send + Sync>,
 }
 
 impl V8ScriptCtx {
@@ -22,15 +22,13 @@ impl V8ScriptCtx {
         isolate: V8Isolate,
         ctx: V8Context,
         script: V8PersistedScript,
-        run_on_background: Box<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>,
-        log: Box<dyn Fn(&str) + Send + Sync>,
+        compiled_library_api: Box<dyn CompiledLibraryInterface + Send + Sync>,
     ) -> V8ScriptCtx {
         V8ScriptCtx {
             isolate: isolate,
             ctx: ctx,
             script: script,
-            run_on_background: run_on_background,
-            log: log,
+            compiled_library_api: compiled_library_api,
         }
     }
 }
