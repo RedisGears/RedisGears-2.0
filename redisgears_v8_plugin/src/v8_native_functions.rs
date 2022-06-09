@@ -403,16 +403,11 @@ pub(crate) fn initialize_globals(
                     return None;
                 }
 
-                let script_ctx_ref = match script_ctx_ref.upgrade() {
-                    Some(s) => s,
-                    None => {
-                        isolate.raise_exception_str("Use of uninitialize script context");
-                        return None;
-                    }
-                };
-
                 let msg_utf8 = msg.to_utf8(isolate).unwrap();
-                (script_ctx_ref.log)(msg_utf8.as_str());
+                match script_ctx_ref.upgrade() {
+                    Some(s) => (s.log)(msg_utf8.as_str()),
+                    None => crate::v8_backend::log(msg_utf8.as_str()), /* do not abort logs */
+                }
                 None
             })
             .to_value(),
