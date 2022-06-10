@@ -320,9 +320,12 @@ impl FunctionCtxInterface for V8Function {
             }
             let bg_client = run_ctx.get_background_client();
             let bg_redis_client = run_ctx.get_redis_client().get_background_redis_client();
-            self.inner_function.script_ctx.compiled_library_api.run_on_background(Box::new(move || {
-                inner_function.call_async(args, bg_client, bg_redis_client);
-            }));
+            self.inner_function
+                .script_ctx
+                .compiled_library_api
+                .run_on_background(Box::new(move || {
+                    inner_function.call_async(args, bg_client, bg_redis_client);
+                }));
             FunctionCallResult::Done
         } else {
             let redis_client = run_ctx.get_redis_client();

@@ -30,18 +30,18 @@ use crate::stream_reader::{ConsumerData, RefCellWrapper, StreamReaderCtx};
 use std::iter::Skip;
 use std::vec::IntoIter;
 
-use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
 use crate::compiled_library_api::CompiledLibraryAPI;
+use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
 
 use rdb::REDIS_GEARS_TYPE;
 
 mod background_run_ctx;
 mod background_run_scope_guard;
+mod compiled_library_api;
 mod rdb;
 mod run_ctx;
 mod stream_reader;
 mod stream_run_ctx;
-mod compiled_library_api;
 
 struct GearsLibraryMataData {
     name: String,
@@ -674,10 +674,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         )));
     }
     let backend = backend.unwrap();
-    let lib_ctx = backend.compile_library(
-        code,
-        Box::new(CompiledLibraryAPI),
-    );
+    let lib_ctx = backend.compile_library(code, Box::new(CompiledLibraryAPI));
     let lib_ctx = match lib_ctx {
         Err(e) => match e {
             GearsApiError::Msg(s) => {

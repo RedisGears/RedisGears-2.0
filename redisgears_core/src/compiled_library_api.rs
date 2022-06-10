@@ -1,5 +1,5 @@
-use redisgears_plugin_api::redisgears_plugin_api::backend_ctx::CompiledLibraryInterface;
 use crate::{get_ctx, get_thread_pool};
+use redisgears_plugin_api::redisgears_plugin_api::backend_ctx::CompiledLibraryInterface;
 
 pub(crate) struct CompiledLibraryAPI;
 

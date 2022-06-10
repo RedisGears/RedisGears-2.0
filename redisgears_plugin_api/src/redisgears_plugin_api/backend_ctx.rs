@@ -18,7 +18,7 @@ pub trait BackendCtxInterface {
     fn compile_library(
         &mut self,
         code: &str,
-        compiled_library_api: Box<dyn CompiledLibraryInterface + Send + Sync> ,
+        compiled_library_api: Box<dyn CompiledLibraryInterface + Send + Sync>,
     ) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError>;
     fn debug(&mut self, args: &[&str]) -> Result<CallResult, GearsApiError>;
 }

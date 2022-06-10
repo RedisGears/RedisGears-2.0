@@ -1,6 +1,6 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    backend_ctx::BackendCtxInterface, load_library_ctx::LibraryCtxInterface, CallResult,
-    GearsApiError, backend_ctx::CompiledLibraryInterface,
+    backend_ctx::BackendCtxInterface, backend_ctx::CompiledLibraryInterface,
+    load_library_ctx::LibraryCtxInterface, CallResult, GearsApiError,
 };
 
 use crate::v8_script_ctx::V8ScriptCtx;
@@ -87,7 +87,7 @@ impl BackendCtxInterface for V8Backend {
     fn compile_library(
         &mut self,
         blob: &str,
-        compiled_library_api: Box<dyn CompiledLibraryInterface + Send + Sync>
+        compiled_library_api: Box<dyn CompiledLibraryInterface + Send + Sync>,
     ) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError> {
         let isolate = V8Isolate::new();
 
@@ -116,12 +116,7 @@ impl BackendCtxInterface for V8Backend {
                 let script = script.persist(&isolate);
                 (ctx, script)
             };
-            let script_ctx = Arc::new(V8ScriptCtx::new(
-                isolate,
-                ctx,
-                script,
-                compiled_library_api
-            ));
+            let script_ctx = Arc::new(V8ScriptCtx::new(isolate, ctx, script, compiled_library_api));
             self.script_ctx_vec.push(Arc::downgrade(&script_ctx));
             if self.script_ctx_vec.len() > 100 {
                 // let try to do some gc

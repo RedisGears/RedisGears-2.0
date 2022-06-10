@@ -210,27 +210,32 @@ pub(crate) fn get_redis_client(
                 let resolver = ctx_scope.new_resolver();
                 let promise = resolver.get_promise();
                 let resolver = resolver.to_value().persist(isolate);
-                script_ctx_ref.compiled_library_api.run_on_background(Box::new(move || {
-                    let _isolate_scope = new_script_ctx_ref.isolate.enter();
-                    let _handlers_scope = new_script_ctx_ref.isolate.new_handlers_scope();
-                    let ctx_scope = new_script_ctx_ref.ctx.enter();
-                    let trycatch = new_script_ctx_ref.isolate.new_try_catch();
+                script_ctx_ref
+                    .compiled_library_api
+                    .run_on_background(Box::new(move || {
+                        let _isolate_scope = new_script_ctx_ref.isolate.enter();
+                        let _handlers_scope = new_script_ctx_ref.isolate.new_handlers_scope();
+                        let ctx_scope = new_script_ctx_ref.ctx.enter();
+                        let trycatch = new_script_ctx_ref.isolate.new_try_catch();
 
-                    let background_client =
-                        get_backgrounnd_client(&new_script_ctx_ref, &ctx_scope, bg_redis_client);
-                    let res = f
-                        .as_local(&new_script_ctx_ref.isolate)
-                        .call(&ctx_scope, Some(&[&background_client.to_value()]));
+                        let background_client = get_backgrounnd_client(
+                            &new_script_ctx_ref,
+                            &ctx_scope,
+                            bg_redis_client,
+                        );
+                        let res = f
+                            .as_local(&new_script_ctx_ref.isolate)
+                            .call(&ctx_scope, Some(&[&background_client.to_value()]));
 
-                    let resolver = resolver.as_local(&new_script_ctx_ref.isolate).as_resolver();
-                    match res {
-                        Some(r) => resolver.resolve(&ctx_scope, &r),
-                        None => {
-                            let error_utf8 = trycatch.get_exception();
-                            resolver.resolve(&ctx_scope, &error_utf8);
+                        let resolver = resolver.as_local(&new_script_ctx_ref.isolate).as_resolver();
+                        match res {
+                            Some(r) => resolver.resolve(&ctx_scope, &r),
+                            None => {
+                                let error_utf8 = trycatch.get_exception();
+                                resolver.resolve(&ctx_scope, &error_utf8);
+                            }
                         }
-                    }
-                }));
+                    }));
                 Some(promise.to_value())
             })
             .to_value(),
@@ -463,18 +468,20 @@ pub(crate) fn initialize_globals(
                         let res = args.get(0).persist(isolate);
                         let new_script_ctx_ref_resolve = Arc::clone(&script_ctx_ref_resolve);
                         let resolver_resolve = Arc::clone(&resolver_resolve);
-                        script_ctx_ref_resolve.compiled_library_api.run_on_background(Box::new(move || {
-                            let _isolate_scope = new_script_ctx_ref_resolve.isolate.enter();
-                            let _isolate_scope =
-                                new_script_ctx_ref_resolve.isolate.new_handlers_scope();
-                            let ctx_scope = new_script_ctx_ref_resolve.ctx.enter();
-                            let _trycatch = new_script_ctx_ref_resolve.isolate.new_try_catch();
-                            let res = res.as_local(&new_script_ctx_ref_resolve.isolate);
-                            let resolver = resolver_resolve
-                                .as_local(&new_script_ctx_ref_resolve.isolate)
-                                .as_resolver();
-                            resolver.resolve(&ctx_scope, &res);
-                        }));
+                        script_ctx_ref_resolve
+                            .compiled_library_api
+                            .run_on_background(Box::new(move || {
+                                let _isolate_scope = new_script_ctx_ref_resolve.isolate.enter();
+                                let _isolate_scope =
+                                    new_script_ctx_ref_resolve.isolate.new_handlers_scope();
+                                let ctx_scope = new_script_ctx_ref_resolve.ctx.enter();
+                                let _trycatch = new_script_ctx_ref_resolve.isolate.new_try_catch();
+                                let res = res.as_local(&new_script_ctx_ref_resolve.isolate);
+                                let resolver = resolver_resolve
+                                    .as_local(&new_script_ctx_ref_resolve.isolate)
+                                    .as_resolver();
+                                resolver.resolve(&ctx_scope, &res);
+                            }));
                         None
                     });
 
@@ -490,18 +497,20 @@ pub(crate) fn initialize_globals(
                         let res = args.get(0).persist(isolate);
                         let new_script_ctx_ref_reject = Arc::clone(&script_ctx_ref_reject);
                         let resolver_reject = Arc::clone(&resolver_reject);
-                        script_ctx_ref_reject.compiled_library_api.run_on_background(Box::new(move || {
-                            let _isolate_scope = new_script_ctx_ref_reject.isolate.enter();
-                            let _isolate_scope =
-                                new_script_ctx_ref_reject.isolate.new_handlers_scope();
-                            let ctx_scope = new_script_ctx_ref_reject.ctx.enter();
-                            let _trycatch = new_script_ctx_ref_reject.isolate.new_try_catch();
-                            let res = res.as_local(&new_script_ctx_ref_reject.isolate);
-                            let resolver = resolver_reject
-                                .as_local(&new_script_ctx_ref_reject.isolate)
-                                .as_resolver();
-                            resolver.reject(&ctx_scope, &res);
-                        }));
+                        script_ctx_ref_reject
+                            .compiled_library_api
+                            .run_on_background(Box::new(move || {
+                                let _isolate_scope = new_script_ctx_ref_reject.isolate.enter();
+                                let _isolate_scope =
+                                    new_script_ctx_ref_reject.isolate.new_handlers_scope();
+                                let ctx_scope = new_script_ctx_ref_reject.ctx.enter();
+                                let _trycatch = new_script_ctx_ref_reject.isolate.new_try_catch();
+                                let res = res.as_local(&new_script_ctx_ref_reject.isolate);
+                                let resolver = resolver_reject
+                                    .as_local(&new_script_ctx_ref_reject.isolate)
+                                    .as_resolver();
+                                resolver.reject(&ctx_scope, &res);
+                            }));
                         None
                     });
 

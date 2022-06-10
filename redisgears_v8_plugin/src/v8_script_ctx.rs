@@ -1,6 +1,6 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface, GearsApiError,
-    backend_ctx::CompiledLibraryInterface,
+    backend_ctx::CompiledLibraryInterface, load_library_ctx::LibraryCtxInterface,
+    load_library_ctx::LoadLibraryCtxInterface, GearsApiError,
 };
 
 use v8_rs::v8::{
