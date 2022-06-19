@@ -18,8 +18,11 @@ def toDictionary(res, max_recursion=1000):
 def runUntil(env, expected_result, callback, sleep_time=0.1, timeout=1):
     with TimeLimit(timeout, env, "Failed waiting for callback to return '%s'" % str(expected_result)):
         while True:
-            if callback() == expected_result:
-                break
+            try:
+                if callback() == expected_result:
+                    break
+            except Excetion:
+                pass
             time.sleep(sleep_time)
 
 def runFor(expected_result, callback, sleep_time=0.1, timeout=1):
