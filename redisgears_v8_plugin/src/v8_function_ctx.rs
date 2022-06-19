@@ -196,6 +196,7 @@ impl V8InternalFunction {
                 Some(s)
             });
 
+            ctx_scope.set_private_data(0, Some(&true)); // indicate we are blocked
             let res = self
                 .persisted_function
                 .as_local(&self.script_ctx.isolate)
@@ -203,6 +204,7 @@ impl V8InternalFunction {
                     &ctx_scope,
                     args_ref.as_ref().map_or(None, |v| Some(v.as_slice())),
                 );
+            ctx_scope.set_private_data::<bool>(0, None); // indicate we are not blocked
             res
         };
 

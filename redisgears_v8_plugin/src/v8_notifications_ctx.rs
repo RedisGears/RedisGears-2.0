@@ -66,6 +66,8 @@ impl V8NotificationsCtxInternal {
             redis_client.set_client(c);
             let redis_client = Arc::new(RefCell::new(redis_client));
             let r_client = get_redis_client(&self.script_ctx, &ctx_scope, &redis_client);
+
+            ctx_scope.set_private_data(0, Some(&true)); // indicate we are blocked
             let res = self
                 .persisted_function
                 .as_local(&self.script_ctx.isolate)
@@ -73,6 +75,8 @@ impl V8NotificationsCtxInternal {
                     &ctx_scope,
                     Some(&[&r_client.to_value(), &notification_data.to_value()]),
                 );
+            ctx_scope.set_private_data::<bool>(0, None); // indicate we are not blocked
+            
             redis_client.borrow_mut().make_invalid();
 
             match res {

@@ -349,7 +349,13 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                 return Status::Err;
             }
         };
-        let lib = Library::new(v8_path).unwrap();
+        let lib = match Library::new(v8_path) {
+            Ok(l) => l,
+            Err(e) => {
+                ctx.log_warning(&format!("Failed loading '{}', {}", v8_path, e));
+                return Status::Err;
+            }
+        };
         {
             let func: Symbol<unsafe fn() -> *mut dyn BackendCtxInterface> =
                 lib.get(b"initialize_plugin").unwrap();

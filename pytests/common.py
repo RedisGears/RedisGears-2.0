@@ -21,7 +21,7 @@ def runUntil(env, expected_result, callback, sleep_time=0.1, timeout=1):
             try:
                 if callback() == expected_result:
                     break
-            except Excetion:
+            except Exception:
                 pass
             time.sleep(sleep_time)
 

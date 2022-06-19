@@ -13,10 +13,11 @@ use crate::v8_function_ctx::V8Function;
 use crate::v8_notifications_ctx::V8NotificationsCtx;
 use crate::v8_script_ctx::V8ScriptCtx;
 use crate::v8_stream_ctx::V8StreamCtx;
+use crate::v8_backend::log;
 
 use std::cell::RefCell;
 use std::str;
-use std::sync::Arc;
+use std::sync::{Arc};
 
 pub(crate) fn call_result_to_js_object(
     isolate: &V8Isolate,
@@ -101,6 +102,13 @@ pub(crate) fn get_backgrounnd_client(
                     isolate.raise_exception_str("Argument to 'block' must be a function");
                     return None;
                 }
+
+                let is_already_blocked = ctx_scope.get_private_data::<bool>(0);
+                if !is_already_blocked.is_none() && *is_already_blocked.unwrap() {
+                    isolate.raise_exception_str("Main thread is already blocked");
+                    return None;
+                }
+
                 let redis_client = {
                     let _unlocker = isolate.new_unlocker();
                     redis_background_client_ref.lock()
@@ -112,16 +120,20 @@ pub(crate) fn get_backgrounnd_client(
                         return None;
                     }
                 };
+
                 let r_client = Arc::new(RefCell::new(RedisClient::new()));
                 r_client.borrow_mut().set_client(redis_client);
                 let c = get_redis_client(&script_ctx_ref, ctx_scope, &r_client);
+               
+                ctx_scope.set_private_data(0, Some(&true)); // indicate we are blocked
                 let res = f.call(ctx_scope, Some(&[&c.to_value()]));
+                ctx_scope.set_private_data::<bool>(0, None);
+
                 r_client.borrow_mut().make_invalid();
                 res
             })
             .to_value(),
     );
-
     bg_client
 }
 
@@ -140,6 +152,12 @@ pub(crate) fn get_redis_client(
             .new_native_function(move |args, isolate, ctx_scope| {
                 if args.len() < 1 {
                     isolate.raise_exception_str("Wrong number of arguments to 'call' function");
+                    return None;
+                }
+
+                let is_already_blocked = ctx_scope.get_private_data::<bool>(0);
+                if is_already_blocked.is_none() || !*is_already_blocked.unwrap() {
+                    isolate.raise_exception_str("Main thread is not locked");
                     return None;
                 }
 
@@ -249,7 +267,6 @@ pub(crate) fn get_redis_client(
             })
             .to_value(),
     );
-
     client
 }
 
@@ -513,8 +530,8 @@ pub(crate) fn initialize_globals(
                     }
                 };
 
-                let script_ctx_ref_resolve = Arc::clone(&script_ctx_ref);
-                let script_ctx_ref_reject = Arc::clone(&script_ctx_ref);
+                let script_ctx_ref_resolve = Arc::downgrade(&script_ctx_ref);
+                let script_ctx_ref_reject = Arc::downgrade(&script_ctx_ref);
                 let resolver = curr_ctx_scope.new_resolver();
                 let promise = resolver.get_promise();
                 let resolver_resolve = Arc::new(resolver.to_value().persist(isolate));
@@ -529,12 +546,29 @@ pub(crate) fn initialize_globals(
                             return None;
                         }
 
+                        let script_ctx_ref_resolve = match script_ctx_ref_resolve.upgrade() {
+                            Some(s) => s,
+                            None => {
+                                isolate.raise_exception_str(
+                                    "Library was deleted",
+                                );
+                                return None;
+                            }
+                        };
+
                         let res = args.get(0).persist(isolate);
-                        let new_script_ctx_ref_resolve = Arc::clone(&script_ctx_ref_resolve);
+                        let new_script_ctx_ref_resolve = Arc::downgrade(&script_ctx_ref_resolve);
                         let resolver_resolve = Arc::clone(&resolver_resolve);
                         script_ctx_ref_resolve
                             .compiled_library_api
                             .run_on_background(Box::new(move || {
+                                let new_script_ctx_ref_resolve = match new_script_ctx_ref_resolve.upgrade() {
+                                    Some(s) => s,
+                                    None => {
+                                        log("Library was delete while not all the jobs were done");
+                                        return;
+                                    }
+                                };
                                 let _isolate_scope = new_script_ctx_ref_resolve.isolate.enter();
                                 let _isolate_scope =
                                     new_script_ctx_ref_resolve.isolate.new_handlers_scope();
@@ -558,12 +592,30 @@ pub(crate) fn initialize_globals(
                             return None;
                         }
 
+                        let script_ctx_ref_reject = match script_ctx_ref_reject.upgrade() {
+                            Some(s) => s,
+                            None => {
+                                isolate.raise_exception_str(
+                                    "Library was deleted",
+                                );
+                                return None;
+                            }
+                        };
+
+
                         let res = args.get(0).persist(isolate);
-                        let new_script_ctx_ref_reject = Arc::clone(&script_ctx_ref_reject);
+                        let new_script_ctx_ref_reject = Arc::downgrade(&script_ctx_ref_reject);
                         let resolver_reject = Arc::clone(&resolver_reject);
                         script_ctx_ref_reject
                             .compiled_library_api
                             .run_on_background(Box::new(move || {
+                                let new_script_ctx_ref_reject = match new_script_ctx_ref_reject.upgrade() {
+                                    Some(s) => s,
+                                    None => {
+                                        log("Library was delete while not all the jobs were done");
+                                        return;
+                                    }
+                                };
                                 let _isolate_scope = new_script_ctx_ref_reject.isolate.enter();
                                 let _isolate_scope =
                                     new_script_ctx_ref_reject.isolate.new_handlers_scope();

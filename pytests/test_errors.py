@@ -52,3 +52,28 @@ def testNoRegistrations(env):
 
     '''
     env.expect('RG.FUNCTION', 'LOAD', 'UPGRADE', script).error().contains("No function nor registrations was registered")
+
+@gearsTest()
+def testBlockRedisTwice(env):
+    """#!js name=foo
+redis.register_function('test', async function(c1){
+    return await c1.block(function(c2){
+        c1.block(function(c3){}); // blocking again
+    });
+})
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'foo', 'test').error().contains('thread is already blocked')
+    
+@gearsTest()
+def testCallRedisWhenNotBlocked(env):
+    """#!js name=foo
+redis.register_function('test', async function(c){
+    return await c.block(function(c1){
+        return c1.run_on_background(async function(c2){
+            return c1.call('ping'); // call redis when not blocked
+        });
+    });
+})
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'foo', 'test').error().contains('thread is not locked')
+    
