@@ -72,7 +72,7 @@ redis.register_stream_consumer("consumer", "stream", 1, false, function(){
     """
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vv'), 6)
-    env.assertEqual('Error', res[0]['stream_registrations'][0]['streams'][0]['last_error'])
+    env.assertEqual('Error', res[0]['stream_consumers'][0]['streams'][0]['last_error'])
 
 @gearsTest()
 def testStreamWindow(env):
@@ -110,18 +110,18 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
     runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
 
     res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
-    env.assertEqual(3, len(res[0]['stream_registrations'][0]['streams'][0]['pending_ids']))
+    env.assertEqual(3, len(res[0]['stream_consumers'][0]['streams'][0]['pending_ids']))
 
     env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal('OK')
     runUntil(env, 2, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
     
-    runUntil(env, 2, lambda: len(toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['pending_ids']))
+    runUntil(env, 2, lambda: len(toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['pending_ids']))
 
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
 
     res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
-    env.assertEqual(3, len(res[0]['stream_registrations'][0]['streams'][0]['pending_ids']))
+    env.assertEqual(3, len(res[0]['stream_consumers'][0]['streams'][0]['pending_ids']))
 
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     runFor(3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
@@ -130,7 +130,7 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
     runUntil(env, 3, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
 
     res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
-    env.assertEqual(2, res[0]['stream_registrations'][0]['streams'][0]['total_record_processed'])
+    env.assertEqual(2, res[0]['stream_consumers'][0]['streams'][0]['total_record_processed'])
 
 @gearsTest(envArgs={'useSlaves': True})
 def testStreamWithReplication(env):
@@ -159,17 +159,17 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(cli
     """
     slave_conn = env.getSlaveConnection()
 
-    env.expect('WAIT', '1', '5000').equal(1)
+    env.expect('WAIT', '1', '7000').equal(1)
 
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     runUntil(env, 1, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
 
     res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
-    id_to_read_from = res[0]['stream_registrations'][0]['streams'][0]['id_to_read_from']
+    id_to_read_from = res[0]['stream_consumers'][0]['streams'][0]['id_to_read_from']
 
     env.expect('RG.FUNCTION', 'CALL', 'lib', 'continue').equal(id_to_read_from)
-    runUntil(env, 1, lambda: len(toDictionary(slave_conn.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams']))
-    env.assertEqual(id_to_read_from, toDictionary(slave_conn.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['id_to_read_from'])
+    runUntil(env, 1, lambda: len(toDictionary(slave_conn.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams']))
+    env.assertEqual(id_to_read_from, toDictionary(slave_conn.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['id_to_read_from'])
 
     # add 2 more record to the stream
     id1 = env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
@@ -236,7 +236,7 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
     runUntil(env, 0, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
 
     res = env.cmd('RG.FUNCTION', 'LIST', 'vvv')
-    env.assertEqual(0, len(toDictionary(res, 6)[0]['stream_registrations'][0]['streams']))
+    env.assertEqual(0, len(toDictionary(res, 6)[0]['stream_consumers'][0]['streams']))
 
 @gearsTest()
 def testFlushall(env):
@@ -285,7 +285,7 @@ redis.register_stream_consumer("consumer", "stream", 3, true, async function(){
     runUntil(env, 0, lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'num_pending'))
 
     res = env.cmd('RG.FUNCTION', 'LIST', 'vvv')
-    env.assertEqual(0, len(toDictionary(res, 6)[0]['stream_registrations'][0]['streams']))
+    env.assertEqual(0, len(toDictionary(res, 6)[0]['stream_consumers'][0]['streams']))
 
 @gearsTest()
 def testMultipleConsumers(env):
@@ -377,7 +377,6 @@ redis.register_stream_consumer("consumer", "stream", 1, true, async function(cli
     runUntil(env, 'stream:1', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'))
     runUntil(env, 'stream:2', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'))
 
-# skip untill RLTest will be upgraded to support debug command
 @gearsTest()
 def testRDBSaveAndLoad(env):
     """#!js name=lib
@@ -391,12 +390,24 @@ redis.register_stream_consumer("consumer", "stream", 1, false, async function(cl
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
 
-    runUntil(env, 4, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['total_record_processed'])
-    id_to_read_from1 = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['id_to_read_from']
+    runUntil(env, 4, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['total_record_processed'])
+    id_to_read_from1 = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['id_to_read_from']
 
     env.expect('DEBUG', 'RELOAD').equal('OK')
 
-    id_to_read_from2 = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_registrations'][0]['streams'][0]['id_to_read_from']
+    id_to_read_from2 = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['id_to_read_from']
 
     env.assertEqual(id_to_read_from1, id_to_read_from2)
 
+@gearsTest()
+def testCallingRedisCommandOnStreamConsumer(env):
+    """#!js name=lib
+
+redis.register_stream_consumer("consumer", "stream", 1, false, function(client, data){
+    client.call('ping');
+})
+    """
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    
+    runUntil(env, 1, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['total_record_processed'])
+    env.assertEqual('None', toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['last_error'])

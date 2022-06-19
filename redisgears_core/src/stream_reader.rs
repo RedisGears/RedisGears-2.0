@@ -8,6 +8,8 @@ use std::sync::{Arc, Weak};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::RefCellWrapper;
+
 pub(crate) trait StreamReaderRecord {
     fn get_id(&self) -> RedisModuleStreamID;
 }
@@ -242,13 +244,6 @@ fn read_next_data<T: StreamReaderRecord>(
     c_i.last_read_id = Some(new_id);
     r
 }
-
-pub(crate) struct RefCellWrapper<T> {
-    pub(crate) ref_cell: RefCell<T>,
-}
-
-unsafe impl<T> Sync for RefCellWrapper<T> {}
-unsafe impl<T> Send for RefCellWrapper<T> {}
 
 fn send_new_data<T: StreamReaderRecord + 'static, C: StreamConsumer<T> + 'static>(
     stream: Arc<RefCellWrapper<TrackedStream>>,

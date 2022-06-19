@@ -1,23 +1,22 @@
-use redis_module::{context::thread_safe::ContextGuard, Context, RedisError};
+use redis_module::{context::thread_safe::ContextGuard, RedisError};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
     CallResult,
 };
 
-use crate::{background_run_ctx::BackgroundRunCtx, redis_value_to_call_reply};
+use crate::{background_run_ctx::BackgroundRunCtx, redis_value_to_call_reply, get_ctx};
 
-pub(crate) struct BackgroundRunScopeGuardCtx<'a> {
+pub(crate) struct BackgroundRunScopeGuardCtx {
     pub(crate) _ctx_guard: ContextGuard,
-    pub(crate) ctx: &'a Context,
 }
 
-unsafe impl<'a> Sync for BackgroundRunScopeGuardCtx<'a> {}
-unsafe impl<'a> Send for BackgroundRunScopeGuardCtx<'a> {}
+unsafe impl Sync for BackgroundRunScopeGuardCtx {}
+unsafe impl Send for BackgroundRunScopeGuardCtx {}
 
-impl<'a> RedisClientCtxInterface for BackgroundRunScopeGuardCtx<'a> {
+impl RedisClientCtxInterface for BackgroundRunScopeGuardCtx {
     fn call(&self, command: &str, args: &[&str]) -> CallResult {
-        let res = self.ctx.call(command, args);
+        let res = get_ctx().call(command, args);
         match res {
             Ok(r) => redis_value_to_call_reply(r),
             Err(e) => match e {
@@ -30,7 +29,7 @@ impl<'a> RedisClientCtxInterface for BackgroundRunScopeGuardCtx<'a> {
     }
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
-        Box::new(BackgroundRunCtx {})
+        Box::new(BackgroundRunCtx::new())
     }
 
     fn as_redis_client(&self) -> &dyn RedisClientCtxInterface {

@@ -170,6 +170,13 @@ impl BackendCtxInterface for V8Backend {
                     CallResult::Long(not_active),
                 ]))
             }
+            "isolates_strong_count" => {
+                let isolates_strong_count = self.script_ctx_vec
+                    .iter()
+                    .map(|v| CallResult::Long(v.strong_count() as i64))
+                    .collect::<Vec<CallResult>>();
+                Ok(CallResult::Array(isolates_strong_count))
+            }
             "isolates_gc" => {
                 self.isolates_gc();
                 Ok(CallResult::SimpleStr("OK".to_string()))

@@ -1,7 +1,6 @@
 extern crate redis_module;
 
 use threadpool::ThreadPool;
-
 use redis_module::raw::RedisModule_GetDetachedThreadSafeContext;
 
 use redis_module::{
@@ -16,6 +15,7 @@ use redisgears_plugin_api::redisgears_plugin_api::{
     backend_ctx::BackendCtxInterface, function_ctx::FunctionCtxInterface,
     load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface,
     stream_ctx::StreamCtxInterface, CallResult, GearsApiError,
+    load_library_ctx::RegisteredKeys, keys_notifications_consumer_ctx::KeysNotificationsConsumerCtxInterface,
 };
 
 use crate::run_ctx::RunCtx;
@@ -26,14 +26,19 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 
-use crate::stream_reader::{ConsumerData, RefCellWrapper, StreamReaderCtx};
+use crate::stream_reader::{ConsumerData, StreamReaderCtx};
 use std::iter::Skip;
 use std::vec::IntoIter;
 
 use crate::compiled_library_api::CompiledLibraryAPI;
 use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
+use crate::keys_notifications::{NotificationConsumer, KeysNotificationsCtx, NotificationCallback};
+use crate::keys_notifications_ctx::{KeysNotificationsRunCtx};
+use crate::compiled_library_api::CompiledLibraryInternals;
 
 use rdb::REDIS_GEARS_TYPE;
+
+use std::cell::RefCell;
 
 mod background_run_ctx;
 mod background_run_scope_guard;
@@ -42,6 +47,15 @@ mod rdb;
 mod run_ctx;
 mod stream_reader;
 mod stream_run_ctx;
+mod keys_notifications;
+mod keys_notifications_ctx;
+
+pub(crate) struct RefCellWrapper<T> {
+    pub(crate) ref_cell: RefCell<T>,
+}
+
+unsafe impl<T> Sync for RefCellWrapper<T> {}
+unsafe impl<T> Send for RefCellWrapper<T> {}
 
 struct GearsLibraryMataData {
     name: String,
@@ -55,12 +69,14 @@ struct GearsLibraryCtx {
     stream_consumers:
         HashMap<String, Arc<RefCellWrapper<ConsumerData<GearsStreamRecord, GearsStreamConsumer>>>>,
     revert_stream_consumers: Vec<(String, GearsStreamConsumer, usize, bool)>,
+    notifications_consumers: HashMap<String, Arc<RefCell<NotificationConsumer>>>,
     old_lib: Option<Box<GearsLibrary>>,
 }
 
 struct GearsLibrary {
     gears_lib_ctx: GearsLibraryCtx,
     lib_ctx: Box<dyn LibraryCtxInterface>,
+    compile_lib_internals: Arc<CompiledLibraryInternals>
 }
 
 fn redis_value_to_call_reply(r: RedisValue) -> CallResult {
@@ -165,6 +181,49 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             .insert(name.to_string(), stream_registration);
         Ok(())
     }
+
+    fn register_key_space_notification_consumer(
+        &mut self,
+        name: &str,
+        key: RegisteredKeys,
+        keys_notifications_consumer_ctx: Box<dyn KeysNotificationsConsumerCtxInterface>,
+    ) -> Result<(), GearsApiError> {
+        if self.notifications_consumers.contains_key(name) {
+            return Err(GearsApiError::Msg(
+                "Notification consumer already exists".to_string(),
+            ));
+        }
+
+        let fire_event_callback: NotificationCallback = Box::new(move|event, key, done_callback| {
+            let val = keys_notifications_consumer_ctx.on_notification_fired(event, key, Box::new(KeysNotificationsRunCtx));
+            keys_notifications_consumer_ctx.post_command_notification(val, Box::new(KeysNotificationsRunCtx), done_callback)
+        });
+
+        let consumer = if let Some(old_notification_consumer) = self
+            .old_lib
+            .as_ref()
+            .map_or(None, |v| v.gears_lib_ctx.notifications_consumers.get(name))
+        {
+            let mut o_c = old_notification_consumer.borrow_mut();
+            let _old_consumer_callback = o_c.set_callback(fire_event_callback);
+            // todo: add old consumer to some list for revert (if needed)
+            Arc::clone(old_notification_consumer)
+        } else {
+            let globlas = get_globals_mut();
+            let consumer = match key {
+                RegisteredKeys::Key(k) => {
+                    globlas.notifications_ctx.add_consumer_on_key(k, fire_event_callback)
+                }
+                RegisteredKeys::Prefix(p) => {
+                    globlas.notifications_ctx.add_consumer_on_prefix(p, fire_event_callback)
+                }
+            };
+            consumer
+        };
+
+        self.notifications_consumers.insert(name.to_string(), consumer);
+        Ok(())
+    }
 }
 
 struct GlobalCtx {
@@ -175,6 +234,7 @@ struct GlobalCtx {
     pool: ThreadPool,
     mgmt_pool: ThreadPool,
     stream_ctx: StreamReaderCtx<GearsStreamRecord, GearsStreamConsumer>,
+    notifications_ctx: KeysNotificationsCtx,
 }
 
 static mut GLOBALS: Option<GlobalCtx> = None;
@@ -261,6 +321,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                     }
                 }),
             ),
+            notifications_ctx: KeysNotificationsCtx::new(),
         };
 
         let v8_path = match args.into_iter().next() {
@@ -517,6 +578,8 @@ fn function_list_command(
                     RedisValue::BulkString(l.gears_lib_ctx.meta_data.engine.to_string()),
                     RedisValue::BulkString("name".to_string()),
                     RedisValue::BulkString(l.gears_lib_ctx.meta_data.name.to_string()),
+                    RedisValue::BulkString("pending_jobs".to_string()),
+                    RedisValue::Integer(l.compile_lib_internals.pending_jobs() as i64),
                     RedisValue::BulkString("functions".to_string()),
                     RedisValue::Array(
                         l.gears_lib_ctx
@@ -525,7 +588,7 @@ fn function_list_command(
                             .map(|k| RedisValue::BulkString(k.to_string()))
                             .collect::<Vec<RedisValue>>(),
                     ),
-                    RedisValue::BulkString("stream_registrations".to_string()),
+                    RedisValue::BulkString("stream_consumers".to_string()),
                     RedisValue::Array(
                         l.gears_lib_ctx
                             .stream_consumers
@@ -650,6 +713,32 @@ fn function_list_command(
                             })
                             .collect::<Vec<RedisValue>>(),
                     ),
+                    RedisValue::BulkString("notifications_consumers".to_string()),
+                    RedisValue::Array(
+                        l.gears_lib_ctx.notifications_consumers.iter().map(|(name, c)|{
+                            if verbosity == 0 {
+                                RedisValue::BulkString(name.to_string())
+                            } else {
+                                let stats = c.borrow().get_stats();
+                                RedisValue::Array(vec![
+                                    RedisValue::BulkString("name".to_string()),
+                                    RedisValue::BulkString(name.to_string()),
+                                    RedisValue::BulkString("num_triggered".to_string()),
+                                    RedisValue::Integer(stats.num_trigger as i64),
+                                    RedisValue::BulkString("num_success".to_string()),
+                                    RedisValue::Integer(stats.num_success as i64),
+                                    RedisValue::BulkString("num_failed".to_string()),
+                                    RedisValue::Integer(stats.num_failed as i64),
+                                    RedisValue::BulkString("last_error".to_string()),
+                                    RedisValue::BulkString(match stats.last_error {
+                                        Some(s) => s,
+                                        None => "None".to_string(),
+                                    }),
+                                ])
+                                
+                            }
+                        }).collect::<Vec<RedisValue>>(),
+                    ),
                 ];
                 if with_code {
                     res.push(RedisValue::BulkString("code".to_string()));
@@ -674,7 +763,9 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         )));
     }
     let backend = backend.unwrap();
-    let lib_ctx = backend.compile_library(code, Box::new(CompiledLibraryAPI));
+    let compile_lib_ctx = CompiledLibraryAPI::new();
+    let compile_lib_internals = compile_lib_ctx.take_internals();
+    let lib_ctx = backend.compile_library(code, Box::new(compile_lib_ctx));
     let lib_ctx = match lib_ctx {
         Err(e) => match e {
             GearsApiError::Msg(s) => {
@@ -700,6 +791,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         meta_data: meta_data,
         functions: HashMap::new(),
         stream_consumers: HashMap::new(),
+        notifications_consumers: HashMap::new(),
         revert_stream_consumers: Vec::new(),
         old_lib: old_lib.map_or(None, |v| Some(Box::new(v))),
     };
@@ -723,7 +815,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         }
         return ret;
     }
-    if gears_library.functions.len() == 0 && gears_library.stream_consumers.len() == 0 {
+    if gears_library.functions.len() == 0 && gears_library.stream_consumers.len() == 0 && gears_library.notifications_consumers.len() == 0 {
         if let Some(old_lib) = gears_library.old_lib.take() {
             for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
                 let stream_data = gears_library.stream_consumers.get(&name).unwrap();
@@ -744,6 +836,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         GearsLibrary {
             gears_lib_ctx: gears_library,
             lib_ctx: lib_ctx,
+            compile_lib_internals: compile_lib_internals,
         },
     );
     Ok(RedisValue::SimpleStringStatic("OK"))
@@ -811,6 +904,10 @@ fn generic_notification(_ctx: &Context, _event_type: NotifyEvent, event: &str, k
         let stream_ctx = &mut get_globals_mut().stream_ctx;
         stream_ctx.on_stream_deleted(event, key);
     }
+}
+
+fn key_space_notification(_ctx: &Context, _event_type: NotifyEvent, event: &str, key: &str) {
+    get_globals().notifications_ctx.on_key_touched(event, key)
 }
 
 fn update_stream_last_read_id(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -924,6 +1021,11 @@ fn on_flush_event(ctx: &Context, event_data: ServerEventData) {
     }
 }
 
+// fn on_command_called(_ctx: &Context, _event_data: ServerEventData) {
+//     // let res = ctx.call("ping", &[]);
+//     // println!("{:?}", res);
+// }
+
 redis_module! {
     name: "redisgears_2",
     version: 999999,
@@ -937,10 +1039,12 @@ redis_module! {
     event_handlers: [
         [@STREAM: on_stream_touched],
         [@GENERIC: generic_notification],
+        [@ALL @MISSED: key_space_notification],
     ],
     server_events: [
         [@RuleChanged: on_role_changed],
         [@Loading: on_loading_event],
         [@Flush: on_flush_event],
+        // [@Command: on_command_called],
     ]
 }

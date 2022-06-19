@@ -1,6 +1,7 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
     load_library_ctx::LoadLibraryCtxInterface, run_function_ctx::BackgroundRunFunctionCtxInterface,
     run_function_ctx::RedisClientCtxInterface, CallResult, GearsApiError,
+    load_library_ctx::RegisteredKeys,
 };
 
 use v8_rs::v8::{
@@ -11,6 +12,7 @@ use v8_rs::v8::{
 use crate::v8_function_ctx::V8Function;
 use crate::v8_script_ctx::V8ScriptCtx;
 use crate::v8_stream_ctx::V8StreamCtx;
+use crate::v8_notifications_ctx::V8NotificationsCtx;
 
 use std::cell::RefCell;
 use std::str;
@@ -84,7 +86,7 @@ pub(crate) fn get_backgrounnd_client(
     let bg_client = script_ctx.isolate.new_object();
     let redis_background_client = Arc::new(redis_background_client);
     let redis_background_client_ref = Arc::clone(&redis_background_client);
-    let script_ctx_ref = Arc::clone(script_ctx);
+    let script_ctx_ref = Arc::downgrade(script_ctx);
     bg_client.set(
         ctx_scope,
         &script_ctx.isolate.new_string("block").to_value(),
@@ -102,6 +104,13 @@ pub(crate) fn get_backgrounnd_client(
                 let redis_client = {
                     let _unlocker = isolate.new_unlocker();
                     redis_background_client_ref.lock()
+                };
+                let script_ctx_ref = match script_ctx_ref.upgrade() {
+                    Some(s) => s,
+                    None => {
+                        isolate.raise_exception_str("Function were unregistered");
+                        return None;
+                    }
                 };
                 let r_client = Arc::new(RefCell::new(RedisClient::new()));
                 r_client.borrow_mut().set_client(redis_client);
@@ -232,7 +241,7 @@ pub(crate) fn get_redis_client(
                             Some(r) => resolver.resolve(&ctx_scope, &r),
                             None => {
                                 let error_utf8 = trycatch.get_exception();
-                                resolver.resolve(&ctx_scope, &error_utf8);
+                                resolver.reject(&ctx_scope, &error_utf8);
                             }
                         }
                     }));
@@ -311,6 +320,61 @@ pub(crate) fn initialize_globals(
             };
             let v8_stream_ctx = V8StreamCtx::new(persisted_function, &script_ctx_ref, if function_callback.is_async_function() {true} else {false});
             let res = load_ctx.register_stream_consumer(registration_name_utf8.as_str(), prefix_utf8.as_str(), Box::new(v8_stream_ctx), window as usize, trim);
+            if let Err(err) = res {
+                match err {
+                    GearsApiError::Msg(s) => isolate.raise_exception_str(&s),
+                }
+                return None;
+            }
+            None
+    }).to_value());
+
+    let script_ctx_ref = Arc::downgrade(script_ctx);
+    redis.set(ctx_scope,
+        &script_ctx.isolate.new_string("register_notifications_consumer").to_value(), 
+        &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
+            if args.len() != 3 {
+                isolate.raise_exception_str("Wrong number of arguments to 'register_notifications_consumer' function");
+                return None;
+            }
+
+            let consumer_name = args.get(0);
+            if !consumer_name.is_string() {
+                isolate.raise_exception_str("First argument to 'register_notifications_consumer' must be a string representing the consumer name");
+                return None;
+            }
+            let registration_name_utf8 = consumer_name.to_utf8(isolate).unwrap();
+
+            let prefix = args.get(1);
+            if !prefix.is_string() {
+                isolate.raise_exception_str("Second argument to 'register_notifications_consumer' must be a string representing the prefix");
+                return None;
+            }
+            let prefix_utf8 = prefix.to_utf8(isolate).unwrap();
+
+            let function_callback = args.get(2);
+            if !function_callback.is_function() {
+                isolate.raise_exception_str("Third argument to 'register_notifications_consumer' must be a function");
+                return None;
+            }
+            let persisted_function = function_callback.persist(isolate);
+
+            let load_ctx = curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0);
+            if load_ctx.is_none() {
+                isolate.raise_exception_str("Called 'register_notifications_consumer' out of context");
+                return None;
+            }
+            let load_ctx = load_ctx.unwrap();
+
+            let script_ctx_ref = match script_ctx_ref.upgrade() {
+                Some(s) => s,
+                None => {
+                    isolate.raise_exception_str("Use of uninitialize script context");
+                    return None;
+                }
+            };
+            let v8_notification_ctx = V8NotificationsCtx::new(persisted_function, &script_ctx_ref, if function_callback.is_async_function() {true} else {false});
+            let res = load_ctx.register_key_space_notification_consumer(registration_name_utf8.as_str(), RegisteredKeys::Prefix(prefix_utf8.as_str()), Box::new(v8_notification_ctx));
             if let Err(err) = res {
                 match err {
                     GearsApiError::Msg(s) => isolate.raise_exception_str(&s),

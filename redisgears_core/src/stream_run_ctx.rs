@@ -18,7 +18,7 @@ impl StreamProcessCtxInterface for StreamRunCtx {
     }
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
-        Box::new(BackgroundRunCtx {})
+        Box::new(BackgroundRunCtx::new())
     }
 }
 

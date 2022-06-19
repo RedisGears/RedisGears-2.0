@@ -5,6 +5,7 @@ mod v8_function_ctx;
 mod v8_native_functions;
 mod v8_script_ctx;
 mod v8_stream_ctx;
+mod v8_notifications_ctx;
 
 use crate::v8_backend::V8Backend;
 
