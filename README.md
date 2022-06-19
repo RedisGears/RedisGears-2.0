@@ -47,7 +47,7 @@ And now we can execute our function using `RG.FUNCTION CALL` command, the comman
 
 ### Calling Redis Commands Inside our Gears Function
 
-It is possible to call Redis commands inside our gears function. The function gets as first argument a client object that allows interaction with Redis using `call` function. The following example exectes a simple `PING` command and return the result:
+It is possible to call Redis commands inside our gears function. The function gets as first argument a client object that allows interaction with Redis using `call` function. The following example executes a simple `PING` command and return the result:
 
 ```js
 #!js name=lib
