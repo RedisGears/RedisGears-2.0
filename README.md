@@ -34,7 +34,7 @@ The first line indicates the engine to use (`js`) and the library name (`lib`). 
 Assuming we put the following code on a file `lib.js`, we can register our function on RedisGears using `RG.FUNCTION LOAD` command:
 
 ```bash
-> redis-cli -x RG.FUNCTION LOAD < ./lib.rs
+> redis-cli -x RG.FUNCTION LOAD < ./lib.js
 OK
 ```
 
@@ -59,13 +59,13 @@ redis.register_function('my_ping', function(client){
 
 If we will try to send it to our running Redis instance, we will get the following error:
 ```bash
-> redis-cli -x RG.FUNCTION LOAD < ./lib.rs
+> redis-cli -x RG.FUNCTION LOAD < ./lib.js
 (error) Library lib already exists
 ```
 
 We get the error because the library with the same name already exists, we can use the `UPGRADE` argument to upgrade the library with the new code:
 ```bash
-> redis-cli -x RG.FUNCTION LOAD UPGRADE < ./lib.rs
+> redis-cli -x RG.FUNCTION LOAD UPGRADE < ./lib.js
 OK
 ```
 
