@@ -76,7 +76,7 @@ impl V8NotificationsCtxInternal {
                     Some(&[&r_client.to_value(), &notification_data.to_value()]),
                 );
             ctx_scope.set_private_data::<bool>(0, None); // indicate we are not blocked
-            
+
             redis_client.borrow_mut().make_invalid();
 
             match res {

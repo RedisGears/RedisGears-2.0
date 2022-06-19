@@ -9,15 +9,15 @@ use v8_rs::v8::{
     v8_value::V8LocalValue, v8_version,
 };
 
+use crate::v8_backend::log;
 use crate::v8_function_ctx::V8Function;
 use crate::v8_notifications_ctx::V8NotificationsCtx;
 use crate::v8_script_ctx::V8ScriptCtx;
 use crate::v8_stream_ctx::V8StreamCtx;
-use crate::v8_backend::log;
 
 use std::cell::RefCell;
 use std::str;
-use std::sync::{Arc};
+use std::sync::Arc;
 
 pub(crate) fn call_result_to_js_object(
     isolate: &V8Isolate,
@@ -124,7 +124,7 @@ pub(crate) fn get_backgrounnd_client(
                 let r_client = Arc::new(RefCell::new(RedisClient::new()));
                 r_client.borrow_mut().set_client(redis_client);
                 let c = get_redis_client(&script_ctx_ref, ctx_scope, &r_client);
-               
+
                 ctx_scope.set_private_data(0, Some(&true)); // indicate we are blocked
                 let res = f.call(ctx_scope, Some(&[&c.to_value()]));
                 ctx_scope.set_private_data::<bool>(0, None);
@@ -549,9 +549,7 @@ pub(crate) fn initialize_globals(
                         let script_ctx_ref_resolve = match script_ctx_ref_resolve.upgrade() {
                             Some(s) => s,
                             None => {
-                                isolate.raise_exception_str(
-                                    "Library was deleted",
-                                );
+                                isolate.raise_exception_str("Library was deleted");
                                 return None;
                             }
                         };
@@ -562,7 +560,9 @@ pub(crate) fn initialize_globals(
                         script_ctx_ref_resolve
                             .compiled_library_api
                             .run_on_background(Box::new(move || {
-                                let new_script_ctx_ref_resolve = match new_script_ctx_ref_resolve.upgrade() {
+                                let new_script_ctx_ref_resolve = match new_script_ctx_ref_resolve
+                                    .upgrade()
+                                {
                                     Some(s) => s,
                                     None => {
                                         log("Library was delete while not all the jobs were done");
@@ -595,13 +595,10 @@ pub(crate) fn initialize_globals(
                         let script_ctx_ref_reject = match script_ctx_ref_reject.upgrade() {
                             Some(s) => s,
                             None => {
-                                isolate.raise_exception_str(
-                                    "Library was deleted",
-                                );
+                                isolate.raise_exception_str("Library was deleted");
                                 return None;
                             }
                         };
-
 
                         let res = args.get(0).persist(isolate);
                         let new_script_ctx_ref_reject = Arc::downgrade(&script_ctx_ref_reject);
@@ -609,7 +606,9 @@ pub(crate) fn initialize_globals(
                         script_ctx_ref_reject
                             .compiled_library_api
                             .run_on_background(Box::new(move || {
-                                let new_script_ctx_ref_reject = match new_script_ctx_ref_reject.upgrade() {
+                                let new_script_ctx_ref_reject = match new_script_ctx_ref_reject
+                                    .upgrade()
+                                {
                                     Some(s) => s,
                                     None => {
                                         log("Library was delete while not all the jobs were done");
