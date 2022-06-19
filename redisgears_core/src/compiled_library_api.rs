@@ -26,7 +26,7 @@ impl CompiledLibraryInternals {
         job();
         if jobs_left > 0 {
             let internals_ref = Arc::clone(internals);
-            get_thread_pool().execute(move ||{
+            get_thread_pool().execute(move || {
                 Self::run_next_job(&internals_ref);
             });
         }
@@ -41,7 +41,7 @@ impl CompiledLibraryInternals {
         };
         if pending_jons == 0 {
             let internals_ref = Arc::clone(internals);
-            get_thread_pool().execute(move ||{
+            get_thread_pool().execute(move || {
                 Self::run_next_job(&internals_ref);
             });
         }
@@ -59,7 +59,7 @@ pub(crate) struct CompiledLibraryAPI {
 
 impl CompiledLibraryAPI {
     pub(crate) fn new() -> CompiledLibraryAPI {
-        CompiledLibraryAPI{
+        CompiledLibraryAPI {
             internals: Arc::new(CompiledLibraryInternals::new()),
         }
     }
@@ -68,7 +68,7 @@ impl CompiledLibraryAPI {
         CompiledLibraryInternals::add_job(&self.internals, job);
     }
 
-    pub(crate) fn take_internals(&self) -> Arc<CompiledLibraryInternals>{
+    pub(crate) fn take_internals(&self) -> Arc<CompiledLibraryInternals> {
         Arc::clone(&self.internals)
     }
 }

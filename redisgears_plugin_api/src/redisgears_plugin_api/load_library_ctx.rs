@@ -1,7 +1,7 @@
 use crate::redisgears_plugin_api::function_ctx::FunctionCtxInterface;
+use crate::redisgears_plugin_api::keys_notifications_consumer_ctx::KeysNotificationsConsumerCtxInterface;
 use crate::redisgears_plugin_api::stream_ctx::StreamCtxInterface;
 use crate::redisgears_plugin_api::GearsApiError;
-use crate::redisgears_plugin_api::keys_notifications_consumer_ctx::KeysNotificationsConsumerCtxInterface;
 
 pub trait LibraryCtxInterface {
     fn load_library(

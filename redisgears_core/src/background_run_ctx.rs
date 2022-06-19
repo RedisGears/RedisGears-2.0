@@ -4,7 +4,7 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 
 use crate::background_run_scope_guard::BackgroundRunScopeGuardCtx;
 
-use redis_module::{ThreadSafeContext};
+use redis_module::ThreadSafeContext;
 
 pub(crate) struct BackgroundRunCtx {}
 
@@ -13,7 +13,7 @@ unsafe impl Send for BackgroundRunCtx {}
 
 impl BackgroundRunCtx {
     pub(crate) fn new() -> BackgroundRunCtx {
-        BackgroundRunCtx{}
+        BackgroundRunCtx {}
     }
 }
 

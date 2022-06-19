@@ -1,11 +1,10 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
     keys_notifications_consumer_ctx::NotificationRunCtxInterface,
-    run_function_ctx::RedisClientCtxInterface,
-    run_function_ctx::BackgroundRunFunctionCtxInterface,
+    run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
 };
 
-use crate::run_ctx::RedisClient;
 use crate::background_run_ctx::BackgroundRunCtx;
+use crate::run_ctx::RedisClient;
 
 pub(crate) struct KeysNotificationsRunCtx;
 

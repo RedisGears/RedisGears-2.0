@@ -5,7 +5,7 @@ use redisgears_plugin_api::redisgears_plugin_api::{
     CallResult,
 };
 
-use crate::{background_run_ctx::BackgroundRunCtx, redis_value_to_call_reply, get_ctx};
+use crate::{background_run_ctx::BackgroundRunCtx, get_ctx, redis_value_to_call_reply};
 
 pub(crate) struct BackgroundRunScopeGuardCtx {
     pub(crate) _ctx_guard: ContextGuard,

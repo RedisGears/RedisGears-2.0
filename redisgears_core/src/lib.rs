@@ -1,7 +1,7 @@
 extern crate redis_module;
 
-use threadpool::ThreadPool;
 use redis_module::raw::RedisModule_GetDetachedThreadSafeContext;
+use threadpool::ThreadPool;
 
 use redis_module::{
     context::keys_cursor::KeysCursor, context::server_events::FlushSubevent,
@@ -13,9 +13,9 @@ use redis_module::{
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     backend_ctx::BackendCtxInterface, function_ctx::FunctionCtxInterface,
+    keys_notifications_consumer_ctx::KeysNotificationsConsumerCtxInterface,
     load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface,
-    stream_ctx::StreamCtxInterface, CallResult, GearsApiError,
-    load_library_ctx::RegisteredKeys, keys_notifications_consumer_ctx::KeysNotificationsConsumerCtxInterface,
+    load_library_ctx::RegisteredKeys, stream_ctx::StreamCtxInterface, CallResult, GearsApiError,
 };
 
 use crate::run_ctx::RunCtx;
@@ -31,10 +31,10 @@ use std::iter::Skip;
 use std::vec::IntoIter;
 
 use crate::compiled_library_api::CompiledLibraryAPI;
-use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
-use crate::keys_notifications::{NotificationConsumer, KeysNotificationsCtx, NotificationCallback};
-use crate::keys_notifications_ctx::{KeysNotificationsRunCtx};
 use crate::compiled_library_api::CompiledLibraryInternals;
+use crate::keys_notifications::{KeysNotificationsCtx, NotificationCallback, NotificationConsumer};
+use crate::keys_notifications_ctx::KeysNotificationsRunCtx;
+use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
 
 use rdb::REDIS_GEARS_TYPE;
 
@@ -43,12 +43,12 @@ use std::cell::RefCell;
 mod background_run_ctx;
 mod background_run_scope_guard;
 mod compiled_library_api;
+mod keys_notifications;
+mod keys_notifications_ctx;
 mod rdb;
 mod run_ctx;
 mod stream_reader;
 mod stream_run_ctx;
-mod keys_notifications;
-mod keys_notifications_ctx;
 
 pub(crate) struct RefCellWrapper<T> {
     pub(crate) ref_cell: RefCell<T>,
@@ -76,7 +76,7 @@ struct GearsLibraryCtx {
 struct GearsLibrary {
     gears_lib_ctx: GearsLibraryCtx,
     lib_ctx: Box<dyn LibraryCtxInterface>,
-    compile_lib_internals: Arc<CompiledLibraryInternals>
+    compile_lib_internals: Arc<CompiledLibraryInternals>,
 }
 
 fn redis_value_to_call_reply(r: RedisValue) -> CallResult {
@@ -194,10 +194,19 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             ));
         }
 
-        let fire_event_callback: NotificationCallback = Box::new(move|event, key, done_callback| {
-            let val = keys_notifications_consumer_ctx.on_notification_fired(event, key, Box::new(KeysNotificationsRunCtx));
-            keys_notifications_consumer_ctx.post_command_notification(val, Box::new(KeysNotificationsRunCtx), done_callback)
-        });
+        let fire_event_callback: NotificationCallback =
+            Box::new(move |event, key, done_callback| {
+                let val = keys_notifications_consumer_ctx.on_notification_fired(
+                    event,
+                    key,
+                    Box::new(KeysNotificationsRunCtx),
+                );
+                keys_notifications_consumer_ctx.post_command_notification(
+                    val,
+                    Box::new(KeysNotificationsRunCtx),
+                    done_callback,
+                )
+            });
 
         let consumer = if let Some(old_notification_consumer) = self
             .old_lib
@@ -211,17 +220,18 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
         } else {
             let globlas = get_globals_mut();
             let consumer = match key {
-                RegisteredKeys::Key(k) => {
-                    globlas.notifications_ctx.add_consumer_on_key(k, fire_event_callback)
-                }
-                RegisteredKeys::Prefix(p) => {
-                    globlas.notifications_ctx.add_consumer_on_prefix(p, fire_event_callback)
-                }
+                RegisteredKeys::Key(k) => globlas
+                    .notifications_ctx
+                    .add_consumer_on_key(k, fire_event_callback),
+                RegisteredKeys::Prefix(p) => globlas
+                    .notifications_ctx
+                    .add_consumer_on_prefix(p, fire_event_callback),
             };
             consumer
         };
 
-        self.notifications_consumers.insert(name.to_string(), consumer);
+        self.notifications_consumers
+            .insert(name.to_string(), consumer);
         Ok(())
     }
 }
@@ -715,29 +725,32 @@ fn function_list_command(
                     ),
                     RedisValue::BulkString("notifications_consumers".to_string()),
                     RedisValue::Array(
-                        l.gears_lib_ctx.notifications_consumers.iter().map(|(name, c)|{
-                            if verbosity == 0 {
-                                RedisValue::BulkString(name.to_string())
-                            } else {
-                                let stats = c.borrow().get_stats();
-                                RedisValue::Array(vec![
-                                    RedisValue::BulkString("name".to_string()),
-                                    RedisValue::BulkString(name.to_string()),
-                                    RedisValue::BulkString("num_triggered".to_string()),
-                                    RedisValue::Integer(stats.num_trigger as i64),
-                                    RedisValue::BulkString("num_success".to_string()),
-                                    RedisValue::Integer(stats.num_success as i64),
-                                    RedisValue::BulkString("num_failed".to_string()),
-                                    RedisValue::Integer(stats.num_failed as i64),
-                                    RedisValue::BulkString("last_error".to_string()),
-                                    RedisValue::BulkString(match stats.last_error {
-                                        Some(s) => s,
-                                        None => "None".to_string(),
-                                    }),
-                                ])
-                                
-                            }
-                        }).collect::<Vec<RedisValue>>(),
+                        l.gears_lib_ctx
+                            .notifications_consumers
+                            .iter()
+                            .map(|(name, c)| {
+                                if verbosity == 0 {
+                                    RedisValue::BulkString(name.to_string())
+                                } else {
+                                    let stats = c.borrow().get_stats();
+                                    RedisValue::Array(vec![
+                                        RedisValue::BulkString("name".to_string()),
+                                        RedisValue::BulkString(name.to_string()),
+                                        RedisValue::BulkString("num_triggered".to_string()),
+                                        RedisValue::Integer(stats.num_trigger as i64),
+                                        RedisValue::BulkString("num_success".to_string()),
+                                        RedisValue::Integer(stats.num_success as i64),
+                                        RedisValue::BulkString("num_failed".to_string()),
+                                        RedisValue::Integer(stats.num_failed as i64),
+                                        RedisValue::BulkString("last_error".to_string()),
+                                        RedisValue::BulkString(match stats.last_error {
+                                            Some(s) => s,
+                                            None => "None".to_string(),
+                                        }),
+                                    ])
+                                }
+                            })
+                            .collect::<Vec<RedisValue>>(),
                     ),
                 ];
                 if with_code {
@@ -815,7 +828,10 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         }
         return ret;
     }
-    if gears_library.functions.len() == 0 && gears_library.stream_consumers.len() == 0 && gears_library.notifications_consumers.len() == 0 {
+    if gears_library.functions.len() == 0
+        && gears_library.stream_consumers.len() == 0
+        && gears_library.notifications_consumers.len() == 0
+    {
         if let Some(old_lib) = gears_library.old_lib.take() {
             for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
                 let stream_data = gears_library.stream_consumers.get(&name).unwrap();

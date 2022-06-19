@@ -171,7 +171,8 @@ impl BackendCtxInterface for V8Backend {
                 ]))
             }
             "isolates_strong_count" => {
-                let isolates_strong_count = self.script_ctx_vec
+                let isolates_strong_count = self
+                    .script_ctx_vec
                     .iter()
                     .map(|v| CallResult::Long(v.strong_count() as i64))
                     .collect::<Vec<CallResult>>();

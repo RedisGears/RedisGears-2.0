@@ -1,7 +1,7 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    load_library_ctx::LoadLibraryCtxInterface, run_function_ctx::BackgroundRunFunctionCtxInterface,
-    run_function_ctx::RedisClientCtxInterface, CallResult, GearsApiError,
-    load_library_ctx::RegisteredKeys,
+    load_library_ctx::LoadLibraryCtxInterface, load_library_ctx::RegisteredKeys,
+    run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
+    CallResult, GearsApiError,
 };
 
 use v8_rs::v8::{
@@ -10,9 +10,9 @@ use v8_rs::v8::{
 };
 
 use crate::v8_function_ctx::V8Function;
+use crate::v8_notifications_ctx::V8NotificationsCtx;
 use crate::v8_script_ctx::V8ScriptCtx;
 use crate::v8_stream_ctx::V8StreamCtx;
-use crate::v8_notifications_ctx::V8NotificationsCtx;
 
 use std::cell::RefCell;
 use std::str;
