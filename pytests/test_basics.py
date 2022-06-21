@@ -76,3 +76,57 @@ redis.register_function("test", function(client){
 })  
     """
     env.expect('RG.FUNCTION', 'CALL', 'foo', 'test').equal("undefined")
+
+@gearsTest()
+def testOOM(env):
+    """#!js name=lib
+redis.register_function("set", function(client, key, val){
+    return client.call('set', key, val);
+})  
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'set', 'x', '1').equal('OK')
+    env.expect('CONFIG', 'SET', 'maxmemory', '1')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'set', 'x', '1').error().contains('OOM can not run the function when out of memory')
+
+@gearsTest()
+def testOOMOnAsyncFunction(env):
+    """#!js name=lib
+var continue_set = null;
+var set_done = null;
+var set_failed = null;
+
+redis.register_function("async_set_continue",
+    async function(client) {
+        if (continue_set == null) {
+            throw "no async set was triggered"
+        }
+        continue_set("continue");
+        return await new Promise((resolve, reject) => {
+            set_done = resolve;
+            set_failed = reject
+        })
+    },
+    ["allow-oom"]
+)
+
+redis.register_function("async_set_trigger", function(client, key, val){
+    client.run_on_background(async function(client){
+        await new Promise((resolve, reject) => {
+            continue_set = resolve;
+        })
+        try {
+            client.block(function(c){
+                c.call('set', key, val);
+            });
+        } catch (error) {
+            set_failed(error);
+            return;
+        }
+        set_done("OK");
+    });
+    return "OK";
+});
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'async_set_trigger', 'x', '1').equal('OK')
+    env.expect('CONFIG', 'SET', 'maxmemory', '1')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'async_set_continue').error().contains('OOM Can not lock redis for write')

@@ -9,6 +9,7 @@ use v8_rs::v8::{
     v8_value::V8LocalValue, v8_version,
 };
 
+use crate::get_function_flags;
 use crate::v8_backend::log;
 use crate::v8_function_ctx::V8Function;
 use crate::v8_notifications_ctx::V8NotificationsCtx;
@@ -111,7 +112,16 @@ pub(crate) fn get_backgrounnd_client(
 
                 let redis_client = {
                     let _unlocker = isolate.new_unlocker();
-                    redis_background_client_ref.lock()
+                    match redis_background_client_ref.lock() {
+                        Ok(l) => l,
+                        Err(err) => {
+                            isolate.raise_exception_str(&format!(
+                                "Can not lock Redis, {}",
+                                err.get_msg()
+                            ));
+                            return None;
+                        }
+                    }
                 };
                 let script_ctx_ref = match script_ctx_ref.upgrade() {
                     Some(s) => s,
@@ -405,7 +415,7 @@ pub(crate) fn initialize_globals(
     redis.set(ctx_scope,
         &script_ctx.isolate.new_string("register_function").to_value(),
         &ctx_scope.new_native_function(move|args, isolate, curr_ctx_scope| {
-            if args.len() != 2 {
+            if args.len() < 2 {
                 isolate.raise_exception_str("Wrong number of arguments to 'register_function' function");
                 return None;
             }
@@ -423,6 +433,24 @@ pub(crate) fn initialize_globals(
                 return None;
             }
             let persisted_function = function_callback.persist(isolate);
+
+            let function_flags = if args.len() == 3 {
+                let function_flags = args.get(2);
+                if !function_flags.is_array() {
+                    isolate.raise_exception_str("Second argument to 'register_function' must be an array of functions flags");
+                    return None;
+                }
+                let function_flags = function_flags.as_array();
+                match get_function_flags(isolate, curr_ctx_scope, &function_flags) {
+                    Ok(flags) => flags,
+                    Err(e) => {
+                        isolate.raise_exception_str(&format!("Failed parsing function flags, {}", e));
+                        return None;
+                    }
+                }
+            } else {
+                0
+            };
 
             let load_ctx = curr_ctx_scope.get_private_data_mut::<&mut dyn LoadLibraryCtxInterface>(0);
             if load_ctx.is_none() {
@@ -450,7 +478,7 @@ pub(crate) fn initialize_globals(
                 function_callback.is_async_function(),
             );
 
-            let res = load_ctx.register_function(function_name_utf8.as_str(), Box::new(f));
+            let res = load_ctx.register_function(function_name_utf8.as_str(), Box::new(f), function_flags);
             if let Err(err) = res {
                 match err {
                     GearsApiError::Msg(s) => isolate.raise_exception_str(&s),

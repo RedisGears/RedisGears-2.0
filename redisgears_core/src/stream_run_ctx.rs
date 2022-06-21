@@ -1,3 +1,5 @@
+use redis_module::context::CallOptionsBuilder;
+
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
     stream_ctx::StreamCtxInterface, stream_ctx::StreamProcessCtxInterface,
@@ -6,7 +8,10 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 
 use redis_module::{raw::RedisModuleStreamID, stream::StreamRecord, ThreadSafeContext};
 
-use crate::{background_run_ctx::BackgroundRunCtx, run_ctx::RedisClient};
+use crate::{
+    background_run_ctx::BackgroundRunCtx,
+    run_ctx::{RedisClient, RedisClientCallOptions},
+};
 
 use crate::stream_reader::{StreamConsumer, StreamReaderAck};
 
@@ -14,11 +19,23 @@ pub(crate) struct StreamRunCtx;
 
 impl StreamProcessCtxInterface for StreamRunCtx {
     fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface> {
-        Box::new(RedisClient::new(None))
+        Box::new(RedisClient::new(None, 0))
     }
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
-        Box::new(BackgroundRunCtx::new(None))
+        let call_options = CallOptionsBuilder::new()
+            .script_mode()
+            .replicate()
+            .verify_acl()
+            .errors_as_replies()
+            .constract();
+        Box::new(BackgroundRunCtx::new(
+            None,
+            RedisClientCallOptions {
+                call_options: call_options,
+                flags: 0,
+            },
+        ))
     }
 }
 

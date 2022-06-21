@@ -15,7 +15,9 @@ use redisgears_plugin_api::redisgears_plugin_api::{
     backend_ctx::BackendCtxInterface, function_ctx::FunctionCtxInterface,
     keys_notifications_consumer_ctx::KeysNotificationsConsumerCtxInterface,
     load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface,
-    load_library_ctx::RegisteredKeys, stream_ctx::StreamCtxInterface, CallResult, GearsApiError,
+    load_library_ctx::RegisteredKeys, load_library_ctx::FUNCTION_FLAG_ALLOW_OOM,
+    load_library_ctx::FUNCTION_FLAG_NO_WRITES, stream_ctx::StreamCtxInterface, CallResult,
+    GearsApiError,
 };
 
 use crate::run_ctx::RunCtx;
@@ -63,9 +65,23 @@ struct GearsLibraryMataData {
     code: String,
 }
 
+struct GearsFunctionCtx {
+    func: Box<dyn FunctionCtxInterface>,
+    flags: u8,
+}
+
+impl GearsFunctionCtx {
+    fn new(func: Box<dyn FunctionCtxInterface>, flags: u8) -> GearsFunctionCtx {
+        GearsFunctionCtx {
+            func: func,
+            flags: flags,
+        }
+    }
+}
+
 struct GearsLibraryCtx {
     meta_data: GearsLibraryMataData,
-    functions: HashMap<String, Box<dyn FunctionCtxInterface>>,
+    functions: HashMap<String, GearsFunctionCtx>,
     stream_consumers:
         HashMap<String, Arc<RefCellWrapper<ConsumerData<GearsStreamRecord, GearsStreamConsumer>>>>,
     revert_stream_consumers: Vec<(String, GearsStreamConsumer, usize, bool)>,
@@ -104,6 +120,7 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
         &mut self,
         name: &str,
         function_ctx: Box<dyn FunctionCtxInterface>,
+        flags: u8,
     ) -> Result<(), GearsApiError> {
         if self.functions.contains_key(name) {
             return Err(GearsApiError::Msg(format!(
@@ -111,7 +128,8 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
                 name
             )));
         }
-        self.functions.insert(name.to_string(), function_ctx);
+        let func_ctx = GearsFunctionCtx::new(function_ctx, flags);
+        self.functions.insert(name.to_string(), func_ctx);
         Ok(())
     }
 
@@ -412,6 +430,18 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
 
 const fn js_info(_ctx: &InfoContext, _for_crash_report: bool) {}
 
+pub(crate) fn verify_oom(flags: u8) -> bool {
+    if (flags & FUNCTION_FLAG_NO_WRITES) == 0 {
+        // function can potentially write data, make sure we are not OOM.
+        if (flags & FUNCTION_FLAG_ALLOW_OOM) == 0 {
+            if get_ctx().is_oom() {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn function_call_command(
     ctx: &Context,
     mut args: Skip<IntoIter<redis_module::RedisString>>,
@@ -439,12 +469,19 @@ fn function_call_command(
 
     let function = function.unwrap();
 
+    if !verify_oom(function.flags) {
+        return Err(RedisError::Str(
+            "OOM can not run the function when out of memory",
+        ));
+    }
+
     let args = args.collect::<Vec<redis_module::RedisString>>();
     let args_iter = args.iter();
 
-    function.call(&mut RunCtx {
+    function.func.call(&mut RunCtx {
         ctx: ctx,
         iter: args_iter,
+        flags: function.flags,
     });
 
     Ok(RedisValue::NoReply)
@@ -1083,7 +1120,7 @@ redis_module! {
     init: js_init,
     info: js_info,
     commands: [
-        ["rg.function", function_command, "readonly", 0,0,0],
+        ["rg.function", function_command, "readonly deny-script", 0,0,0],
         ["_rg_internals.update_stream_last_read_id", update_stream_last_read_id, "readonly", 0,0,0],
     ],
     event_handlers: [

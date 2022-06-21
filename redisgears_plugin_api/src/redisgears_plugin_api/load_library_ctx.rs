@@ -15,11 +15,15 @@ pub enum RegisteredKeys<'a> {
     Prefix(&'a str),
 }
 
+pub const FUNCTION_FLAG_NO_WRITES: u8 = 0x01;
+pub const FUNCTION_FLAG_ALLOW_OOM: u8 = 0x02;
+
 pub trait LoadLibraryCtxInterface {
     fn register_function(
         &mut self,
         name: &str,
         function_ctx: Box<dyn FunctionCtxInterface>,
+        flags: u8,
     ) -> Result<(), GearsApiError>;
     fn register_stream_consumer(
         &mut self,

@@ -1,4 +1,5 @@
 use crate::redisgears_plugin_api::CallResult;
+use crate::redisgears_plugin_api::GearsApiError;
 
 pub trait RedisClientCtxInterface: Send + Sync {
     fn call(&self, command: &str, args: &[&str]) -> CallResult;
@@ -17,7 +18,7 @@ pub trait ReplyCtxInterface: Send + Sync {
 }
 
 pub trait BackgroundRunFunctionCtxInterface: Send + Sync {
-    fn lock<'a>(&'a self) -> Box<dyn RedisClientCtxInterface>;
+    fn lock<'a>(&'a self) -> Result<Box<dyn RedisClientCtxInterface>, GearsApiError>;
 }
 
 pub trait RunFunctionCtxInterface: ReplyCtxInterface {

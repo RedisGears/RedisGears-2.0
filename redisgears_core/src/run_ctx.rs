@@ -4,8 +4,9 @@ use redis_module::{
 };
 
 use redisgears_plugin_api::redisgears_plugin_api::{
-    run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
-    run_function_ctx::ReplyCtxInterface, run_function_ctx::RunFunctionCtxInterface, CallResult,
+    load_library_ctx::FUNCTION_FLAG_NO_WRITES, run_function_ctx::BackgroundRunFunctionCtxInterface,
+    run_function_ctx::RedisClientCtxInterface, run_function_ctx::ReplyCtxInterface,
+    run_function_ctx::RunFunctionCtxInterface, CallResult,
 };
 
 use crate::call_redis_command;
@@ -14,8 +15,14 @@ use std::slice::Iter;
 
 use crate::background_run_ctx::BackgroundRunCtx;
 
+#[derive(Clone)]
+pub(crate) struct RedisClientCallOptions {
+    pub(crate) call_options: CallOptions,
+    pub(crate) flags: u8,
+}
+
 pub(crate) struct RedisClient {
-    call_options: CallOptions,
+    call_options: RedisClientCallOptions,
     user: Option<String>,
 }
 
@@ -23,14 +30,22 @@ unsafe impl Sync for RedisClient {}
 unsafe impl Send for RedisClient {}
 
 impl RedisClient {
-    pub(crate) fn new(user: Option<String>) -> RedisClient {
+    pub(crate) fn new(user: Option<String>, flags: u8) -> RedisClient {
         let call_options = CallOptionsBuilder::new()
-            .safe()
+            .script_mode()
             .replicate()
             .verify_acl()
             .errors_as_replies();
+        let call_options = if flags & FUNCTION_FLAG_NO_WRITES != 0 {
+            call_options.no_writes()
+        } else {
+            call_options
+        };
         RedisClient {
-            call_options: call_options.constract(),
+            call_options: RedisClientCallOptions {
+                call_options: call_options.constract(),
+                flags: flags,
+            },
             user: user,
         }
     }
@@ -38,7 +53,12 @@ impl RedisClient {
 
 impl RedisClientCtxInterface for RedisClient {
     fn call(&self, command: &str, args: &[&str]) -> CallResult {
-        call_redis_command(self.user.as_ref(), command, &self.call_options, args)
+        call_redis_command(
+            self.user.as_ref(),
+            command,
+            &self.call_options.call_options,
+            args,
+        )
     }
 
     fn as_redis_client(&self) -> &dyn RedisClientCtxInterface {
@@ -46,13 +66,17 @@ impl RedisClientCtxInterface for RedisClient {
     }
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
-        Box::new(BackgroundRunCtx::new(self.user.clone()))
+        Box::new(BackgroundRunCtx::new(
+            self.user.clone(),
+            self.call_options.clone(),
+        ))
     }
 }
 
 pub(crate) struct RunCtx<'a> {
     pub(crate) ctx: &'a Context,
     pub(crate) iter: Iter<'a, redis_module::RedisString>,
+    pub(crate) flags: u8,
 }
 
 impl<'a> ReplyCtxInterface for RunCtx<'a> {
@@ -108,7 +132,7 @@ impl<'a> RunFunctionCtxInterface for RunCtx<'a> {
             Ok(u) => Some(u),
             Err(_) => None,
         };
-        Box::new(RedisClient::new(user))
+        Box::new(RedisClient::new(user, self.flags))
     }
 }
 
