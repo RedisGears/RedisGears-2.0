@@ -6,9 +6,9 @@ use threadpool::ThreadPool;
 use redis_module::{
     context::keys_cursor::KeysCursor, context::server_events::FlushSubevent,
     context::server_events::LoadingSubevent, context::server_events::ServerEventData,
-    context::server_events::ServerRole, raw::KeyType::Stream, redis_command, redis_event_handler,
-    redis_module, Context, InfoContext, NextArg, NotifyEvent, RedisError, RedisResult, RedisString,
-    RedisValue, Status, ThreadSafeContext, context::CallOptions,
+    context::server_events::ServerRole, context::CallOptions, raw::KeyType::Stream, redis_command,
+    redis_event_handler, redis_module, Context, InfoContext, NextArg, NotifyEvent, RedisError,
+    RedisResult, RedisString, RedisValue, Status, ThreadSafeContext,
 };
 
 use redisgears_plugin_api::redisgears_plugin_api::{
@@ -75,7 +75,7 @@ struct GearsLibraryCtx {
 
 struct GearsLibrary {
     gears_lib_ctx: GearsLibraryCtx,
-    lib_ctx: Box<dyn LibraryCtxInterface>,
+    _lib_ctx: Box<dyn LibraryCtxInterface>,
     compile_lib_internals: Arc<CompiledLibraryInternals>,
 }
 
@@ -263,10 +263,6 @@ pub fn get_ctx() -> &'static Context {
     &get_globals().redis_ctx
 }
 
-fn get_backends() -> &'static HashMap<String, Box<dyn BackendCtxInterface>> {
-    &get_globals().backends
-}
-
 fn get_backends_mut() -> &'static mut HashMap<String, Box<dyn BackendCtxInterface>> {
     &mut get_globals_mut().backends
 }
@@ -283,7 +279,12 @@ pub(crate) fn get_thread_pool() -> &'static ThreadPool {
     &get_globals().pool
 }
 
-pub(crate) fn call_redis_command(user: Option<&String>, command: &str, call_options: &CallOptions, args: &[&str]) -> CallResult {
+pub(crate) fn call_redis_command(
+    user: Option<&String>,
+    command: &str,
+    call_options: &CallOptions,
+    args: &[&str],
+) -> CallResult {
     let ctx = match user {
         Some(u) => {
             let ctx = &get_globals().authenticated_redis_ctx;
@@ -884,7 +885,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         gears_library.meta_data.name.to_string(),
         GearsLibrary {
             gears_lib_ctx: gears_library,
-            lib_ctx: lib_ctx,
+            _lib_ctx: lib_ctx,
             compile_lib_internals: compile_lib_internals,
         },
     );

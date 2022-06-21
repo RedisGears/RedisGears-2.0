@@ -1,11 +1,14 @@
-use redis_module::{Context, ThreadSafeContext, context::{CallOptions, CallOptionsBuilder}};
+use redis_module::{
+    context::{CallOptions, CallOptionsBuilder},
+    Context, ThreadSafeContext,
+};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
     run_function_ctx::ReplyCtxInterface, run_function_ctx::RunFunctionCtxInterface, CallResult,
 };
 
-use crate::{call_redis_command};
+use crate::call_redis_command;
 
 use std::slice::Iter;
 
@@ -21,8 +24,12 @@ unsafe impl Send for RedisClient {}
 
 impl RedisClient {
     pub(crate) fn new(user: Option<String>) -> RedisClient {
-        let call_options = CallOptionsBuilder::new().safe().replicate().verify_acl().errors_as_replies();
-        RedisClient{
+        let call_options = CallOptionsBuilder::new()
+            .safe()
+            .replicate()
+            .verify_acl()
+            .errors_as_replies();
+        RedisClient {
             call_options: call_options.constract(),
             user: user,
         }

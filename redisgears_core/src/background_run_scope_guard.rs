@@ -1,4 +1,7 @@
-use redis_module::{context::thread_safe::ContextGuard, context::{CallOptions, CallOptionsBuilder}};
+use redis_module::{
+    context::thread_safe::ContextGuard,
+    context::{CallOptions, CallOptionsBuilder},
+};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
@@ -18,8 +21,12 @@ unsafe impl Send for BackgroundRunScopeGuardCtx {}
 
 impl BackgroundRunScopeGuardCtx {
     pub(crate) fn new(ctx_guard: ContextGuard, user: Option<String>) -> BackgroundRunScopeGuardCtx {
-        let call_options = CallOptionsBuilder::new().safe().replicate().verify_acl().errors_as_replies();
-        BackgroundRunScopeGuardCtx{
+        let call_options = CallOptionsBuilder::new()
+            .safe()
+            .replicate()
+            .verify_acl()
+            .errors_as_replies();
+        BackgroundRunScopeGuardCtx {
             _ctx_guard: ctx_guard,
             call_options: call_options.constract(),
             user: user,
