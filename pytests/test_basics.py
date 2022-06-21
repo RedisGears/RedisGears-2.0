@@ -68,3 +68,11 @@ redis.register_function("test", "bar"); // this will fail
     env.assertEqual(isolate_stats['active'], 1)
     env.assertEqual(isolate_stats['not_active'], 1)
 
+@gearsTest()
+def testRedisCallNullReply(env):
+    """#!js name=foo
+redis.register_function("test", function(client){
+    return client.call('get', 'x');
+})  
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'foo', 'test').equal("undefined")

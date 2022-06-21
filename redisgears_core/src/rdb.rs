@@ -29,6 +29,11 @@ pub(crate) static REDIS_GEARS_TYPE: RedisType = RedisType::new(
         unlink: None,
         copy: None,
         defrag: None,
+
+        free_effort2: None,
+        unlink2: None,
+        copy2: None,
+        mem_usage2: None,
     },
 );
 

@@ -8,7 +8,7 @@ use redis_module::{
     context::server_events::LoadingSubevent, context::server_events::ServerEventData,
     context::server_events::ServerRole, raw::KeyType::Stream, redis_command, redis_event_handler,
     redis_module, Context, InfoContext, NextArg, NotifyEvent, RedisError, RedisResult, RedisString,
-    RedisValue, Status, ThreadSafeContext,
+    RedisValue, Status, ThreadSafeContext, context::CallOptions,
 };
 
 use redisgears_plugin_api::redisgears_plugin_api::{
@@ -94,6 +94,7 @@ fn redis_value_to_call_reply(r: RedisValue) -> CallResult {
                 .collect::<Vec<CallResult>>();
             CallResult::Array(res)
         }
+        RedisValue::Null => CallResult::Null,
         _ => panic!("not yet implemented"),
     }
 }
@@ -240,6 +241,7 @@ struct GlobalCtx {
     libraries: HashMap<String, GearsLibrary>,
     backends: HashMap<String, Box<dyn BackendCtxInterface>>,
     redis_ctx: Context,
+    authenticated_redis_ctx: Context,
     plugins: Vec<Library>,
     pool: ThreadPool,
     mgmt_pool: ThreadPool,
@@ -281,13 +283,38 @@ pub(crate) fn get_thread_pool() -> &'static ThreadPool {
     &get_globals().pool
 }
 
+pub(crate) fn call_redis_command(user: Option<&String>, command: &str, call_options: &CallOptions, args: &[&str]) -> CallResult {
+    let ctx = match user {
+        Some(u) => {
+            let ctx = &get_globals().authenticated_redis_ctx;
+            if ctx.autenticate_user(u) == Status::Err {
+                return CallResult::Error("Failed authenticating client".to_string());
+            }
+            ctx
+        }
+        None => get_ctx(),
+    };
+    let res = ctx.call_ext(command, call_options, args);
+    match res {
+        Ok(r) => redis_value_to_call_reply(r),
+        Err(e) => match e {
+            RedisError::Str(s) => CallResult::Error(s.to_string()),
+            RedisError::String(s) => CallResult::Error(s),
+            RedisError::WrongArity => CallResult::Error("Wrong arity".to_string()),
+            RedisError::WrongType => CallResult::Error("Wrong type".to_string()),
+        },
+    }
+}
+
 fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
     let mgmt_pool = ThreadPool::new(1);
     unsafe {
         let inner_ctx = RedisModule_GetDetachedThreadSafeContext.unwrap()(ctx.ctx);
+        let inner_autenticated_ctx = RedisModule_GetDetachedThreadSafeContext.unwrap()(ctx.ctx);
         let mut global_ctx = GlobalCtx {
             libraries: HashMap::new(),
             redis_ctx: Context::new(inner_ctx),
+            authenticated_redis_ctx: Context::new(inner_autenticated_ctx),
             backends: HashMap::new(),
             plugins: Vec::new(),
             pool: ThreadPool::new(1),

@@ -56,8 +56,8 @@ pub(crate) fn call_result_to_js_object(
                     .collect::<Vec<&V8LocalValue>>(),
             );
             Some(array.to_value())
-        }
-        _ => panic!("Not yet supproted"),
+        },
+        CallResult::Null => None,
     }
 }
 

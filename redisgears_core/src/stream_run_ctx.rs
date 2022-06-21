@@ -14,11 +14,11 @@ pub(crate) struct StreamRunCtx;
 
 impl StreamProcessCtxInterface for StreamRunCtx {
     fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface> {
-        Box::new(RedisClient {})
+        Box::new(RedisClient::new(None))
     }
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
-        Box::new(BackgroundRunCtx::new())
+        Box::new(BackgroundRunCtx::new(None))
     }
 }
 

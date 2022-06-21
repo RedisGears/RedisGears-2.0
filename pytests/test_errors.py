@@ -77,3 +77,17 @@ redis.register_function('test', async function(c){
     """
     env.expect('RG.FUNCTION', 'CALL', 'foo', 'test').error().contains('thread is not locked')
     
+@gearsTest()
+def testCommandsNotAllowedOnScript(env):
+    """#!js name=foo
+redis.register_function('test1', function(c){
+    return c.call('eval', 'return 1', '0');
+})
+redis.register_function('test2', async function(c1){
+    c1.block(function(c2){
+        return c2.call('eval', 'return 1', '0');
+    });
+})
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'foo', 'test1').error().contains('is not allowed on script mode')
+    env.expect('RG.FUNCTION', 'CALL', 'foo', 'test2').error().contains('is not allowed on script mode')
