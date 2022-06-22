@@ -442,6 +442,19 @@ pub(crate) fn verify_oom(flags: u8) -> bool {
     true
 }
 
+pub(crate) fn verify_ok_on_replica(flags: u8) -> bool {
+    let ctx = get_ctx();
+    if ctx.is_primary() {
+        // not replica, ok to run.
+        return true;
+    }
+    if (flags & FUNCTION_FLAG_NO_WRITES) != 0 {
+        // we can run functions with no-writes flag on replica
+        return true;
+    }
+    false
+}
+
 fn function_call_command(
     ctx: &Context,
     mut args: Skip<IntoIter<redis_module::RedisString>>,
@@ -468,6 +481,12 @@ fn function_call_command(
     }
 
     let function = function.unwrap();
+
+    if !verify_ok_on_replica(function.flags) {
+        return Err(RedisError::Str(
+            "Err can not run a function that might perform writes on a replica",
+        ));
+    }
 
     if !verify_oom(function.flags) {
         return Err(RedisError::Str(
@@ -602,6 +621,17 @@ fn function_debug_command(
         },
     }
 }
+fn function_list_command_flags(flags: u8) -> RedisValue {
+    let mut res = Vec::new();
+    if (flags & FUNCTION_FLAG_NO_WRITES) != 0 {
+        res.push(RedisValue::BulkString("no-writes".to_string()));
+    }
+    if (flags & FUNCTION_FLAG_ALLOW_OOM) != 0 {
+        res.push(RedisValue::BulkString("allow-oom".to_string()));
+    }
+    RedisValue::Array(res)
+}
+
 fn function_list_command(
     _ctx: &Context,
     mut args: Skip<IntoIter<redis_module::RedisString>>,
@@ -662,13 +692,26 @@ fn function_list_command(
                     RedisValue::BulkString("pending_jobs".to_string()),
                     RedisValue::Integer(l.compile_lib_internals.pending_jobs() as i64),
                     RedisValue::BulkString("functions".to_string()),
-                    RedisValue::Array(
+                    RedisValue::Array(if verbosity > 0 {
+                        l.gears_lib_ctx
+                            .functions
+                            .iter()
+                            .map(|(k, v)| {
+                                RedisValue::Array(vec![
+                                    RedisValue::BulkString("name".to_string()),
+                                    RedisValue::BulkString(k.to_string()),
+                                    RedisValue::BulkString("flags".to_string()),
+                                    function_list_command_flags(v.flags),
+                                ])
+                            })
+                            .collect::<Vec<RedisValue>>()
+                    } else {
                         l.gears_lib_ctx
                             .functions
                             .keys()
                             .map(|k| RedisValue::BulkString(k.to_string()))
-                            .collect::<Vec<RedisValue>>(),
-                    ),
+                            .collect::<Vec<RedisValue>>()
+                    }),
                     RedisValue::BulkString("stream_consumers".to_string()),
                     RedisValue::Array(
                         l.gears_lib_ctx

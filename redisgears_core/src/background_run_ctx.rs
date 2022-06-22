@@ -5,7 +5,7 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 
 use crate::background_run_scope_guard::BackgroundRunScopeGuardCtx;
 use crate::run_ctx::RedisClientCallOptions;
-use crate::verify_oom;
+use crate::{verify_ok_on_replica, verify_oom};
 
 use redis_module::ThreadSafeContext;
 
@@ -32,6 +32,11 @@ impl BackgroundRunCtx {
 impl BackgroundRunFunctionCtxInterface for BackgroundRunCtx {
     fn lock<'a>(&'a self) -> Result<Box<dyn RedisClientCtxInterface>, GearsApiError> {
         let ctx_guard = ThreadSafeContext::new().lock();
+        if !verify_ok_on_replica(self.call_options.flags) {
+            return Err(GearsApiError::Msg(
+                "Can not lock redis for write on replica".to_string(),
+            ));
+        }
         if !verify_oom(self.call_options.flags) {
             return Err(GearsApiError::Msg(
                 "OOM Can not lock redis for write".to_string(),
