@@ -5,7 +5,7 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 
 use crate::v8_script_ctx::V8ScriptCtx;
 
-use v8_rs::v8::{isolate::V8Isolate, v8_init};
+use v8_rs::v8::{isolate::V8Isolate, v8_init_with_error_handlers};
 
 use crate::v8_native_functions::initialize_globals;
 
@@ -74,13 +74,24 @@ impl BackendCtxInterface for V8Backend {
     fn initialize(
         &self,
         allocator: &'static dyn GlobalAlloc,
-        log: Box<dyn Fn(&str) + 'static>,
+        log_callback: Box<dyn Fn(&str) + 'static>,
     ) -> Result<(), GearsApiError> {
         unsafe {
             GLOBAL.allocator = Some(allocator);
-            GLOBAL.log = Some(log);
+            GLOBAL.log = Some(log_callback);
         }
-        v8_init(); /* Initializing v8 */
+        v8_init_with_error_handlers(
+            Box::new(|line, msg| {
+                let msg = format!("v8 fatal error on {}, {}", line, msg);
+                log(&msg);
+                panic!("{}", msg);
+            }),
+            Box::new(|line, is_heap_oom| {
+                let msg = format!("v8 oom error on {}, is_heap_oom:{}", line, is_heap_oom);
+                log(&msg);
+                panic!("{}", msg);
+            })
+        ); 
         Ok(())
     }
 
@@ -127,6 +138,28 @@ impl BackendCtxInterface for V8Backend {
                 let _handlers_scope = script_ctx.isolate.new_handlers_scope();
                 let ctx_scope = script_ctx.ctx.enter();
                 let globals = ctx_scope.get_globals();
+
+                let oom_script_ctx = Arc::downgrade(&script_ctx);
+
+                script_ctx.isolate.set_near_oom_callback(move |curr_limit, initial_limit| {
+                    let msg = format!("V8 near OOM notification arrive after script ctx was deleted, curr_limit={}, initial_limit={}", curr_limit, initial_limit);
+                    let script_ctx = match oom_script_ctx.upgrade() {
+                        Some(s_c) => s_c,
+                        None => {
+                            log(&msg);
+                            panic!("{}", msg);
+                        }
+                    };
+
+                    script_ctx.compiled_library_api.log(&msg);
+                    // todo: think how to handle this, for now we will crash the processes.
+                    // script_ctx.isolate.terminate_execution();
+
+                    // script_ctx.compiled_library_api.log("Increase max memory to allow aborting the script");
+                    
+                    curr_limit
+                });
+
                 initialize_globals(&script_ctx, &globals, &ctx_scope);
             }
 

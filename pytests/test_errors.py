@@ -91,3 +91,24 @@ redis.register_function('test2', async function(c1){
     """
     env.expect('RG.FUNCTION', 'CALL', 'foo', 'test1').error().contains('is not allowed on script mode')
     env.expect('RG.FUNCTION', 'CALL', 'foo', 'test2').error().contains('is not allowed on script mode')
+
+@gearsTest()
+def testJSStackOverflow(env):
+    """#!js name=foo
+function test() {
+    test();
+}
+redis.register_function('test', test);
+    """
+    env.expect('RG.FUNCTION', 'CALL', 'foo', 'test').error().contains('Maximum call stack size exceeded')
+
+@gearsTest()
+def testJSStackOverflowOnLoading(env):
+    script = """#!js name=foo
+function test() {
+    test();
+}
+test();
+redis.register_function('test', test);
+    """
+    env.expect('RG.FUNCTION', 'LOAD', 'UPGRADE', script).error().contains("Maximum call stack size exceeded")
