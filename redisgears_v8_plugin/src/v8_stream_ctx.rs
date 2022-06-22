@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use std::str;
 
+use crate::get_exception_msg;
+
 struct V8StreamAckCtx {
     ack: Option<Box<dyn FnOnce(StreamRecordAck) + Send>>,
 }
@@ -129,11 +131,8 @@ impl V8StreamCtxInternals {
             Some(_) => StreamRecordAck::Ack,
             None => {
                 // todo: handle promise
-                let error_utf8 = trycatch
-                    .get_exception()
-                    .to_utf8(&self.script_ctx.isolate)
-                    .unwrap();
-                StreamRecordAck::Nack(error_utf8.as_str().to_string())
+                let error_msg = get_exception_msg(&self.script_ctx.isolate, trycatch);
+                StreamRecordAck::Nack(error_msg)
             }
         })
     }
@@ -256,11 +255,8 @@ impl V8StreamCtxInternals {
                 }
                 None => {
                     // todo: hanlde promise
-                    let error_utf8 = trycatch
-                        .get_exception()
-                        .to_utf8(&self.script_ctx.isolate)
-                        .unwrap();
-                    Some(StreamRecordAck::Nack(error_utf8.as_str().to_string()))
+                    let error_msg = get_exception_msg(&self.script_ctx.isolate, trycatch);
+                    Some(StreamRecordAck::Nack(error_msg))
                 }
             }
         };

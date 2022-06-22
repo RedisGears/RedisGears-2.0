@@ -7,6 +7,7 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 
 use v8_rs::v8::{v8_promise::V8PromiseState, v8_value::V8PersistValue};
 
+use crate::get_exception_msg;
 use crate::v8_native_functions::{get_backgrounnd_client, get_redis_client, RedisClient};
 use crate::v8_script_ctx::V8ScriptCtx;
 
@@ -130,11 +131,8 @@ impl V8NotificationsCtxInternal {
                     }
                 }
                 None => {
-                    let error_utf8 = trycatch
-                        .get_exception()
-                        .to_utf8(&self.script_ctx.isolate)
-                        .unwrap();
-                    Some(Err(error_utf8.as_str().to_string()))
+                    let error_msg = get_exception_msg(&self.script_ctx.isolate, trycatch);
+                    Some(Err(error_msg))
                 }
             }
         };
@@ -230,11 +228,8 @@ impl V8NotificationsCtxInternal {
                     }
                 }
                 None => {
-                    let error_utf8 = trycatch
-                        .get_exception()
-                        .to_utf8(&self.script_ctx.isolate)
-                        .unwrap();
-                    Some(Err(error_utf8.as_str().to_string()))
+                    let error_msg = get_exception_msg(&self.script_ctx.isolate, trycatch);
+                    Some(Err(error_msg))
                 }
             }
         };

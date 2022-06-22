@@ -9,6 +9,7 @@ use v8_rs::v8::{isolate::V8Isolate, v8_init_with_error_handlers};
 
 use crate::v8_native_functions::initialize_globals;
 
+use crate::get_exception_msg;
 use crate::v8_script_ctx::V8LibraryCtx;
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -90,8 +91,8 @@ impl BackendCtxInterface for V8Backend {
                 let msg = format!("v8 oom error on {}, is_heap_oom:{}", line, is_heap_oom);
                 log(&msg);
                 panic!("{}", msg);
-            })
-        ); 
+            }),
+        );
         Ok(())
     }
 
@@ -116,10 +117,10 @@ impl BackendCtxInterface for V8Backend {
                 let script = match ctx_scope.compile(&v8code_str) {
                     Some(s) => s,
                     None => {
-                        let error_utf8 = trycatch.get_exception().to_utf8(&isolate).unwrap();
+                        let error_msg = get_exception_msg(&isolate, trycatch);
                         return Err(GearsApiError::Msg(format!(
                             "Failed compiling code, {}",
-                            error_utf8.as_str()
+                            error_msg
                         )));
                     }
                 };
@@ -141,24 +142,31 @@ impl BackendCtxInterface for V8Backend {
 
                 let oom_script_ctx = Arc::downgrade(&script_ctx);
 
-                script_ctx.isolate.set_near_oom_callback(move |curr_limit, initial_limit| {
-                    let msg = format!("V8 near OOM notification arrive after script ctx was deleted, curr_limit={}, initial_limit={}", curr_limit, initial_limit);
-                    let script_ctx = match oom_script_ctx.upgrade() {
-                        Some(s_c) => s_c,
-                        None => {
-                            log(&msg);
-                            panic!("{}", msg);
-                        }
-                    };
+                script_ctx
+                    .isolate
+                    .set_near_oom_callback(move |curr_limit, initial_limit| {
+                        let msg = format!(
+                            "V8 near OOM notification arrive, curr_limit={}, initial_limit={}",
+                            curr_limit, initial_limit
+                        );
+                        let script_ctx = match oom_script_ctx.upgrade() {
+                            Some(s_c) => s_c,
+                            None => {
+                                log("V8 near OOM notification arrive after script was deleted");
+                                log(&msg);
+                                panic!("{}", msg);
+                            }
+                        };
 
-                    script_ctx.compiled_library_api.log(&msg);
-                    // todo: think how to handle this, for now we will crash the processes.
-                    // script_ctx.isolate.terminate_execution();
+                        script_ctx.compiled_library_api.log(&msg);
+                        script_ctx.isolate.terminate_execution();
 
-                    // script_ctx.compiled_library_api.log("Increase max memory to allow aborting the script");
-                    
-                    curr_limit
-                });
+                        script_ctx
+                            .compiled_library_api
+                            .log("Increase max memory to allow aborting the script");
+
+                        (curr_limit as f64 * 1.2) as usize
+                    });
 
                 initialize_globals(&script_ctx, &globals, &ctx_scope);
             }

@@ -10,6 +10,8 @@ use v8_rs::v8::{
 
 use std::sync::Arc;
 
+use crate::get_exception_msg;
+
 pub(crate) struct V8ScriptCtx {
     pub(crate) script: V8PersistedScript,
     pub(crate) ctx: V8Context,
@@ -62,13 +64,10 @@ impl LibraryCtxInterface for V8LibraryCtx {
             .set_private_data::<&mut dyn LoadLibraryCtxInterface>(0, None);
 
         if res.is_none() {
-            let error_utf8 = trycatch
-                .get_exception()
-                .to_utf8(&self.script_ctx.isolate)
-                .unwrap();
+            let error_msg = get_exception_msg(&self.script_ctx.isolate, trycatch);
             return Err(GearsApiError::Msg(format!(
                 "Failed evaluating module: {}",
-                error_utf8.as_str()
+                error_msg
             )));
         }
         let res = res.unwrap();

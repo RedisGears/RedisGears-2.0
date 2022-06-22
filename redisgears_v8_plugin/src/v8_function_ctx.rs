@@ -9,6 +9,7 @@ use v8_rs::v8::{
     v8_value::V8LocalValue, v8_value::V8PersistValue,
 };
 
+use crate::get_exception_msg;
 use crate::v8_native_functions::{get_backgrounnd_client, RedisClient};
 use crate::v8_script_ctx::V8ScriptCtx;
 
@@ -158,11 +159,8 @@ impl V8InternalFunction {
                 }
             }
             None => {
-                let error_utf8 = trycatch
-                    .get_exception()
-                    .to_utf8(&self.script_ctx.isolate)
-                    .unwrap();
-                bg_client.reply_with_error(error_utf8.as_str());
+                let error_msg = get_exception_msg(&self.script_ctx.isolate, trycatch);
+                bg_client.reply_with_error(&error_msg);
             }
         }
         FunctionCallResult::Done
@@ -267,11 +265,8 @@ impl V8InternalFunction {
                 }
             }
             None => {
-                let error_utf8 = trycatch
-                    .get_exception()
-                    .to_utf8(&self.script_ctx.isolate)
-                    .unwrap();
-                run_ctx.reply_with_error(error_utf8.as_str());
+                let error_msg = get_exception_msg(&self.script_ctx.isolate, trycatch);
+                run_ctx.reply_with_error(&error_msg);
             }
         }
         FunctionCallResult::Done

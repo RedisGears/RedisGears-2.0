@@ -1,4 +1,7 @@
-use v8_rs::v8::{isolate::V8Isolate, v8_array::V8LocalArray, v8_context_scope::V8ContextScope};
+use v8_rs::v8::{
+    isolate::V8Isolate, try_catch::V8TryCatch, v8_array::V8LocalArray,
+    v8_context_scope::V8ContextScope,
+};
 
 use redisgears_plugin_api::redisgears_plugin_api::{
     backend_ctx::BackendCtxInterface, load_library_ctx::FUNCTION_FLAG_ALLOW_OOM,
@@ -13,6 +16,16 @@ mod v8_script_ctx;
 mod v8_stream_ctx;
 
 use crate::v8_backend::V8Backend;
+
+pub(crate) fn get_exception_msg(isolate: &V8Isolate, trycatch: V8TryCatch) -> String {
+    if trycatch.has_terminated() {
+        isolate.cancel_terminate_execution();
+        "Err Execution was terminated due to OOM or timeout".to_string()
+    } else {
+        let error_utf8 = trycatch.get_exception().to_utf8(isolate).unwrap();
+        error_utf8.as_str().to_string()
+    }
+}
 
 pub(crate) fn get_function_flags(
     isolate: &V8Isolate,
