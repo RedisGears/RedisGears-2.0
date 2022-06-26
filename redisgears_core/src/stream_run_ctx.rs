@@ -4,25 +4,28 @@ use redisgears_plugin_api::redisgears_plugin_api::{
     stream_ctx::StreamRecordAck, stream_ctx::StreamRecordInterface,
 };
 
-use redis_module::{raw::RedisModuleStreamID, stream::StreamRecord, ThreadSafeContext, RedisString, context::AclPermissions};
+use redis_module::{
+    context::AclPermissions, raw::RedisModuleStreamID, stream::StreamRecord, RedisString,
+    ThreadSafeContext,
+};
 
 use crate::{
-    get_ctx,
     background_run_ctx::BackgroundRunCtx,
+    get_ctx,
     run_ctx::{RedisClient, RedisClientCallOptions},
 };
 
 use crate::stream_reader::{StreamConsumer, StreamReaderAck};
 
-use std::sync::Arc;
 use crate::RefCellWrapper;
+use std::sync::Arc;
 
 pub(crate) struct StreamRunCtx {
     user: String,
     flags: u8,
 }
 
-impl StreamRunCtx{
+impl StreamRunCtx {
     fn new(user: String, flags: u8) -> StreamRunCtx {
         StreamRunCtx {
             user: user,
@@ -81,7 +84,11 @@ pub(crate) struct GearsStreamConsumer {
 }
 
 impl GearsStreamConsumer {
-    pub(crate) fn new(user: &Arc<RefCellWrapper<String>>, flags: u8, ctx: Box<dyn StreamCtxInterface>) -> GearsStreamConsumer {
+    pub(crate) fn new(
+        user: &Arc<RefCellWrapper<String>>,
+        flags: u8,
+        ctx: Box<dyn StreamCtxInterface>,
+    ) -> GearsStreamConsumer {
         let mut permissions = AclPermissions::new();
         permissions.add_full_permission();
         GearsStreamConsumer {
@@ -102,9 +109,11 @@ impl StreamConsumer<GearsStreamRecord> for GearsStreamConsumer {
     ) -> Option<StreamReaderAck> {
         let user = self.user.ref_cell.borrow();
         let key_redis_str = RedisString::create(std::ptr::null_mut(), stream_name);
-        if let Err(e) = get_ctx().acl_check_key_permission(&user, &key_redis_str, &self.permissions) {
+        if let Err(e) = get_ctx().acl_check_key_permission(&user, &key_redis_str, &self.permissions)
+        {
             return Some(StreamReaderAck::Nack(format!(
-                "User '{}' has no permissions on key '{}', {}.", user, stream_name, e
+                "User '{}' has no permissions on key '{}', {}.",
+                user, stream_name, e
             )));
         }
 

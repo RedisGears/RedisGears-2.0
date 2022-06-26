@@ -57,7 +57,7 @@ impl TrackedStream {
 
             let weak_consumer_info = weak_consumer_info.unwrap();
             let consumer_info = weak_consumer_info.ref_cell.borrow();
-            let first_id  = {
+            let first_id = {
                 let first_id = consumer_info.pending_ids.front();
                 if !first_id.is_none() {
                     let first_id = first_id.unwrap();
@@ -85,7 +85,8 @@ impl TrackedStream {
             }
         }
 
-        if id_to_trim.ms < u64::MAX { // do not accidently trimm by u64::MAX
+        if id_to_trim.ms < u64::MAX {
+            // do not accidently trimm by u64::MAX
             (self.stream_trimmer)(&self.name, id_to_trim);
         }
 

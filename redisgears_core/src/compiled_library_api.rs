@@ -1,4 +1,4 @@
-use crate::{get_ctx, execute_on_pool};
+use crate::{execute_on_pool, get_ctx};
 use redisgears_plugin_api::redisgears_plugin_api::backend_ctx::CompiledLibraryInterface;
 use std::collections::LinkedList;
 use std::sync::{Arc, Mutex};

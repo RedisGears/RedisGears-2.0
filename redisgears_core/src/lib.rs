@@ -1,9 +1,6 @@
 extern crate redis_module;
 
-use redis_module::raw::{
-    RedisModule_GetDetachedThreadSafeContext,
-    RedisModule__Assert,
-};
+use redis_module::raw::{RedisModule_GetDetachedThreadSafeContext, RedisModule__Assert};
 use threadpool::ThreadPool;
 
 use redis_module::{
@@ -225,9 +222,12 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             Box::new(move |event, key, done_callback| {
                 let user = user_name.ref_cell.borrow();
                 let key_redis_str = RedisString::create(std::ptr::null_mut(), key);
-                if let Err(e) = get_ctx().acl_check_key_permission(&user, &key_redis_str, &permissions) {
+                if let Err(e) =
+                    get_ctx().acl_check_key_permission(&user, &key_redis_str, &permissions)
+                {
                     done_callback(Err(format!(
-                        "User '{}' has no permissions on key '{}', {}.", user, key, e
+                        "User '{}' has no permissions on key '{}', {}.",
+                        user, key, e
                     )));
                     return;
                 }
@@ -331,7 +331,7 @@ impl Drop for Sentinel {
 }
 
 pub(crate) fn execute_on_pool<F: FnOnce() + Send + 'static>(job: F) {
-    get_thread_pool().lock().unwrap().execute(move||{
+    get_thread_pool().lock().unwrap().execute(move || {
         job();
     });
 }
@@ -372,7 +372,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
             None => ("", 0),
         };
         let file = std::ffi::CString::new(file).unwrap();
-        unsafe{
+        unsafe {
             RedisModule__Assert.unwrap()(
                 "Crashed on panic\0".as_ptr() as *const std::os::raw::c_char,
                 file.as_ptr(),
@@ -408,9 +408,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
 
                     Ok(match stream_iterator.next() {
                         Some(e) => Some(GearsStreamRecord { record: e }),
-                        None => {
-                            None
-                        }
+                        None => None,
                     })
                 }),
                 Box::new(|key_name, id| {
@@ -980,7 +978,9 @@ pub(crate) fn function_load_intrernal(user: String, code: &str, upgrade: bool) -
         return err;
     }
     let mut gears_library = GearsLibraryCtx {
-        user: Arc::new(RefCellWrapper{ref_cell: RefCell::new(user)}),
+        user: Arc::new(RefCellWrapper {
+            ref_cell: RefCell::new(user),
+        }),
         meta_data: meta_data,
         functions: HashMap::new(),
         stream_consumers: HashMap::new(),
