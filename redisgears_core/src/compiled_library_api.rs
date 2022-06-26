@@ -1,4 +1,4 @@
-use crate::{get_ctx, get_thread_pool};
+use crate::{get_ctx, execute_on_pool};
 use redisgears_plugin_api::redisgears_plugin_api::backend_ctx::CompiledLibraryInterface;
 use std::collections::LinkedList;
 use std::sync::{Arc, Mutex};
@@ -26,7 +26,7 @@ impl CompiledLibraryInternals {
         job();
         if jobs_left > 0 {
             let internals_ref = Arc::clone(internals);
-            get_thread_pool().execute(move || {
+            execute_on_pool(move || {
                 Self::run_next_job(&internals_ref);
             });
         }
@@ -41,7 +41,7 @@ impl CompiledLibraryInternals {
         };
         if pending_jons == 0 {
             let internals_ref = Arc::clone(internals);
-            get_thread_pool().execute(move || {
+            execute_on_pool(move || {
                 Self::run_next_job(&internals_ref);
             });
         }

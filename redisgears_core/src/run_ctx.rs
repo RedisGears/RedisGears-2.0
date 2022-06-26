@@ -21,16 +21,8 @@ pub(crate) struct RedisClientCallOptions {
     pub(crate) flags: u8,
 }
 
-pub(crate) struct RedisClient {
-    call_options: RedisClientCallOptions,
-    user: Option<String>,
-}
-
-unsafe impl Sync for RedisClient {}
-unsafe impl Send for RedisClient {}
-
-impl RedisClient {
-    pub(crate) fn new(user: Option<String>, flags: u8) -> RedisClient {
+impl RedisClientCallOptions {
+    pub(crate) fn new(flags: u8) -> RedisClientCallOptions {
         let call_options = CallOptionsBuilder::new()
             .script_mode()
             .replicate()
@@ -41,11 +33,26 @@ impl RedisClient {
         } else {
             call_options
         };
+
+        RedisClientCallOptions {
+            call_options: call_options.constract(),
+            flags: flags,
+        }
+    }
+}
+
+pub(crate) struct RedisClient {
+    call_options: RedisClientCallOptions,
+    user: Option<String>,
+}
+
+unsafe impl Sync for RedisClient {}
+unsafe impl Send for RedisClient {}
+
+impl RedisClient {
+    pub(crate) fn new(user: Option<String>, flags: u8) -> RedisClient {
         RedisClient {
-            call_options: RedisClientCallOptions {
-                call_options: call_options.constract(),
-                flags: flags,
-            },
+            call_options: RedisClientCallOptions::new(flags),
             user: user,
         }
     }

@@ -46,6 +46,7 @@ extern "C" fn aux_save(rdb: *mut raw::RedisModuleIO, _when: c_int) {
     for val in libraries.values() {
         raw::save_string(rdb, &val.gears_lib_ctx.meta_data.name);
         raw::save_string(rdb, &val.gears_lib_ctx.meta_data.code);
+        raw::save_string(rdb, &val.gears_lib_ctx.user.ref_cell.borrow());
         // save the number of streams consumer
         raw::save_unsigned(rdb, val.gears_lib_ctx.stream_consumers.len() as u64);
         for (name, stream_consumer) in val.gears_lib_ctx.stream_consumers.iter() {
@@ -106,16 +107,30 @@ unsafe extern "C" fn aux_load(rdb: *mut raw::RedisModuleIO, encver: c_int, _when
                 Ok(s) => s,
                 Err(e) => {
                     get_ctx()
-                        .log_notice(&format!("Failed converting librart code to string, {}", e));
+                        .log_notice(&format!("Failed converting library code to string, {}", e));
                     return raw::REDISMODULE_ERR as i32;
                 }
             },
             Err(e) => {
-                get_ctx().log_notice(&format!("Failed reading librart code from rdb, {}", e));
+                get_ctx().log_notice(&format!("Failed reading library code from rdb, {}", e));
                 return raw::REDISMODULE_ERR as i32;
             }
         };
-        match function_load_intrernal(&code, false) {
+        let user = match raw::load_string_buffer(rdb) {
+            Ok(s) => match s.to_string() {
+                Ok(s) => s,
+                Err(e) => {
+                    get_ctx()
+                        .log_notice(&format!("Failed converting library user to string, {}", e));
+                    return raw::REDISMODULE_ERR as i32;
+                }
+            },
+            Err(e) => {
+                get_ctx().log_notice(&format!("Failed reading library user from rdb, {}", e));
+                return raw::REDISMODULE_ERR as i32;
+            }
+        };
+        match function_load_intrernal(user, &code, false) {
             Ok(_) => {}
             Err(e) => {
                 get_ctx().log_notice(&format!("Failed loading librart, {}", e));

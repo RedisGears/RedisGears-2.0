@@ -57,19 +57,37 @@ impl TrackedStream {
 
             let weak_consumer_info = weak_consumer_info.unwrap();
             let consumer_info = weak_consumer_info.ref_cell.borrow();
-            let first_id = consumer_info.pending_ids.front();
-            if first_id.is_none() {
-                continue;
-            }
-            let first_id = first_id.unwrap();
+            let first_id  = {
+                let first_id = consumer_info.pending_ids.front();
+                if !first_id.is_none() {
+                    let first_id = first_id.unwrap();
+                    RedisModuleStreamID {
+                        ms: first_id.ms,
+                        seq: first_id.seq,
+                    }
+                } else {
+                    if let Some(last_read_id) = consumer_info.last_read_id.as_ref() {
+                        // if we do not have pending id's it means that last_read_id can be trimmed.
+                        // Increase the seq value to make sure we keep everything which is greater than last_read_id.
+                        RedisModuleStreamID {
+                            ms: last_read_id.ms,
+                            seq: last_read_id.seq + 1,
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+            };
             if first_id.ms < id_to_trim.ms
                 || (first_id.ms == id_to_trim.ms && first_id.seq < id_to_trim.seq)
             {
-                id_to_trim = *first_id;
+                id_to_trim = first_id;
             }
         }
 
-        (self.stream_trimmer)(&self.name, id_to_trim);
+        if id_to_trim.ms < u64::MAX { // do not accidently trimm by u64::MAX
+            (self.stream_trimmer)(&self.name, id_to_trim);
+        }
 
         for id in indexes_to_delete.iter().rev() {
             self.consumers_data.swap_remove(*id);

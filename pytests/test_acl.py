@@ -1,5 +1,6 @@
 from common import gearsTest
 from common import toDictionary
+from common import runUntil
 
 @gearsTest()
 def testAclOnSyncFunction(env):
@@ -118,3 +119,101 @@ redis.register_function("async_get_start", function(client, key){
         env.assertTrue(False, message='Command succeed though should failed')
     except Exception as e:
         env.assertContains("Failed authenticating client", str(e))
+
+@gearsTest()
+def testAclOnNotificationConsumer(env):
+    script = """#!js name=lib
+redis.register_notifications_consumer("test", "", function(client, data) {
+    return client.call("get", "x");
+});
+    """
+    env.expect('ACL', 'SETUSER', 'alice', 'on', '>pass', '~cached:*', '+get', '+rg.function').equal('OK')
+    c = env.getConnection()
+    c.execute_command('AUTH', 'alice', 'pass')
+    c.execute_command('RG.FUNCTION', 'LOAD', script)
+    user = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['user']
+    env.assertEqual(user, 'alice')
+    env.expect('set', 'x', '1').equal(True)
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['notifications_consumers'][0]['last_error']
+    env.assertContains('User does not have permissions on key', last_error)
+    env.expect('set', 'cached:x', '1').equal(True)
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['notifications_consumers'][0]['last_error']
+    env.assertContains("can't access at least one of the keys mentioned in the command", last_error)
+
+@gearsTest()
+def testAclOnAsyncNotificationConsumer(env):
+    script = """#!js name=lib
+redis.register_notifications_consumer("test", "", async function(client, data) {
+    client.block(function(c){
+        return c.call("get", "x");
+    });
+});
+    """
+    env.expect('ACL', 'SETUSER', 'alice', 'on', '>pass', '~cached:*', '+get', '+rg.function').equal('OK')
+    c = env.getConnection()
+    c.execute_command('AUTH', 'alice', 'pass')
+    c.execute_command('RG.FUNCTION', 'LOAD', script)
+    user = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['user']
+    env.assertEqual(user, 'alice')
+    
+    env.expect('set', 'x', '1').equal(True)
+    runUntil(env, 1, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['notifications_consumers'][0]['num_failed'])
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['notifications_consumers'][0]['last_error']
+    env.assertContains('User does not have permissions on key', last_error)
+    
+    env.expect('set', 'cached:x', '1').equal(True)
+    runUntil(env, 2, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['notifications_consumers'][0]['num_failed'])
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['notifications_consumers'][0]['last_error']
+    env.assertContains("can't access at least one of the keys mentioned in the command", last_error)
+
+@gearsTest()
+def testAclOnStreamConsumer(env):
+    script = """#!js name=lib
+redis.register_stream_consumer("consumer", "", 1, false, function(client){
+    return client.call("get", "x");
+});
+    """
+    env.expect('ACL', 'SETUSER', 'alice', 'on', '>pass', '~cached:*', '+get', '+rg.function').equal('OK')
+    c = env.getConnection()
+    c.execute_command('AUTH', 'alice', 'pass')
+    c.execute_command('RG.FUNCTION', 'LOAD', script)
+    user = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['user']
+    env.assertEqual(user, 'alice')
+    env.cmd('xadd', 's', '*', 'foo', 'bar')
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['last_error']
+    env.assertContains('User does not have permissions on key', last_error)
+
+    env.cmd('del', 's') # delete the stream, we want to have a single stream for tests simplicity.
+
+    env.cmd('xadd', 'cached:x', '*', 'foo', 'bar')
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['last_error']
+    env.assertContains("can't access at least one of the keys mentioned in the command", last_error)
+
+@gearsTest()
+def testAclOnAsyncStreamConsumer(env):
+    script = """#!js name=lib
+redis.register_stream_consumer("consumer", "", 1, false, async function(client){
+    return client.block(function(c) {
+        return c.call("get", "x");
+    });
+});
+    """
+    env.expect('ACL', 'SETUSER', 'alice', 'on', '>pass', '~cached:*', '+get', '+rg.function').equal('OK')
+    c = env.getConnection()
+    c.execute_command('AUTH', 'alice', 'pass')
+    c.execute_command('RG.FUNCTION', 'LOAD', script)
+    user = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['user']
+    env.assertEqual(user, 'alice')
+    
+    env.cmd('xadd', 's', '*', 'foo', 'bar')
+    runUntil(env, 1, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['total_record_processed'])
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['last_error']
+    env.assertContains('User does not have permissions on key', last_error)
+    
+    env.cmd('del', 's') # delete the stream, we want to have a single stream for tests simplicity.
+
+    env.cmd('xadd', 'cached:x', '*', 'foo', 'bar')
+    runUntil(env, 1, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['total_record_processed'])
+    last_error = toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['last_error']
+    env.assertContains("can't access at least one of the keys mentioned in the command", last_error)
+

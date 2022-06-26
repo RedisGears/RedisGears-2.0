@@ -1,40 +1,45 @@
-use redis_module::context::CallOptionsBuilder;
-
 use redisgears_plugin_api::redisgears_plugin_api::{
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
     stream_ctx::StreamCtxInterface, stream_ctx::StreamProcessCtxInterface,
     stream_ctx::StreamRecordAck, stream_ctx::StreamRecordInterface,
 };
 
-use redis_module::{raw::RedisModuleStreamID, stream::StreamRecord, ThreadSafeContext};
+use redis_module::{raw::RedisModuleStreamID, stream::StreamRecord, ThreadSafeContext, RedisString, context::AclPermissions};
 
 use crate::{
+    get_ctx,
     background_run_ctx::BackgroundRunCtx,
     run_ctx::{RedisClient, RedisClientCallOptions},
 };
 
 use crate::stream_reader::{StreamConsumer, StreamReaderAck};
 
-pub(crate) struct StreamRunCtx;
+use std::sync::Arc;
+use crate::RefCellWrapper;
+
+pub(crate) struct StreamRunCtx {
+    user: String,
+    flags: u8,
+}
+
+impl StreamRunCtx{
+    fn new(user: String, flags: u8) -> StreamRunCtx {
+        StreamRunCtx {
+            user: user,
+            flags: flags,
+        }
+    }
+}
 
 impl StreamProcessCtxInterface for StreamRunCtx {
     fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface> {
-        Box::new(RedisClient::new(None, 0))
+        Box::new(RedisClient::new(Some(self.user.clone()), self.flags))
     }
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
-        let call_options = CallOptionsBuilder::new()
-            .script_mode()
-            .replicate()
-            .verify_acl()
-            .errors_as_replies()
-            .constract();
         Box::new(BackgroundRunCtx::new(
-            None,
-            RedisClientCallOptions {
-                call_options: call_options,
-                flags: 0,
-            },
+            Some(self.user.clone()),
+            RedisClientCallOptions::new(self.flags),
         ))
     }
 }
@@ -70,6 +75,22 @@ impl StreamRecordInterface for GearsStreamRecord {
 
 pub(crate) struct GearsStreamConsumer {
     pub(crate) ctx: Box<dyn StreamCtxInterface>,
+    user: Arc<RefCellWrapper<String>>,
+    flags: u8,
+    permissions: AclPermissions,
+}
+
+impl GearsStreamConsumer {
+    pub(crate) fn new(user: &Arc<RefCellWrapper<String>>, flags: u8, ctx: Box<dyn StreamCtxInterface>) -> GearsStreamConsumer {
+        let mut permissions = AclPermissions::new();
+        permissions.add_full_permission();
+        GearsStreamConsumer {
+            ctx: ctx,
+            user: Arc::clone(user),
+            flags: flags,
+            permissions: permissions,
+        }
+    }
 }
 
 impl StreamConsumer<GearsStreamRecord> for GearsStreamConsumer {
@@ -79,10 +100,18 @@ impl StreamConsumer<GearsStreamRecord> for GearsStreamConsumer {
         record: GearsStreamRecord,
         ack_callback: Box<dyn FnOnce(StreamReaderAck) + Send>,
     ) -> Option<StreamReaderAck> {
+        let user = self.user.ref_cell.borrow();
+        let key_redis_str = RedisString::create(std::ptr::null_mut(), stream_name);
+        if let Err(e) = get_ctx().acl_check_key_permission(&user, &key_redis_str, &self.permissions) {
+            return Some(StreamReaderAck::Nack(format!(
+                "User '{}' has no permissions on key '{}', {}.", user, stream_name, e
+            )));
+        }
+
         let res = self.ctx.process_record(
             stream_name,
             Box::new(record),
-            &mut StreamRunCtx,
+            &mut StreamRunCtx::new(self.user.ref_cell.borrow().clone(), self.flags),
             Box::new(|ack| {
                 // here we must take the redis lock
                 let ctx = ThreadSafeContext::new();

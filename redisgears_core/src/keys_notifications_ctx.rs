@@ -1,5 +1,3 @@
-use redis_module::context::CallOptionsBuilder;
-
 use redisgears_plugin_api::redisgears_plugin_api::{
     keys_notifications_consumer_ctx::NotificationRunCtxInterface,
     run_function_ctx::BackgroundRunFunctionCtxInterface, run_function_ctx::RedisClientCtxInterface,
@@ -8,26 +6,29 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 use crate::background_run_ctx::BackgroundRunCtx;
 use crate::run_ctx::{RedisClient, RedisClientCallOptions};
 
-pub(crate) struct KeysNotificationsRunCtx;
+pub(crate) struct KeysNotificationsRunCtx {
+    user: String,
+    flags: u8,
+}
+
+impl KeysNotificationsRunCtx {
+    pub(crate) fn new(user: &str, flags: u8) -> KeysNotificationsRunCtx {
+        KeysNotificationsRunCtx {
+            user: user.to_string(),
+            flags: flags,
+        }
+    }
+}
 
 impl NotificationRunCtxInterface for KeysNotificationsRunCtx {
     fn get_redis_client(&self) -> Box<dyn RedisClientCtxInterface> {
-        Box::new(RedisClient::new(None, 0))
+        Box::new(RedisClient::new(Some(self.user.clone()), self.flags))
     }
 
     fn get_background_redis_client(&self) -> Box<dyn BackgroundRunFunctionCtxInterface> {
-        let call_options = CallOptionsBuilder::new()
-            .script_mode()
-            .replicate()
-            .verify_acl()
-            .errors_as_replies()
-            .constract();
         Box::new(BackgroundRunCtx::new(
-            None,
-            RedisClientCallOptions {
-                call_options: call_options,
-                flags: 0,
-            },
+            Some(self.user.clone()),
+            RedisClientCallOptions::new(self.flags),
         ))
     }
 }

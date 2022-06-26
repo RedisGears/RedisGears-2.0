@@ -372,10 +372,10 @@ redis.register_stream_consumer("consumer", "stream", 1, true, async function(cli
     env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
     env.cmd('xadd', 'stream:2', '*', 'foo', 'bar')
 
-    runUntil(env, 'stream:1', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=2)
-    runUntil(env, 'stream:2', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=2)
-    runUntil(env, 'stream:1', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=2)
-    runUntil(env, 'stream:2', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=2)
+    runUntil(env, 'stream:1', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=1)
+    runUntil(env, 'stream:2', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=1)
+    runUntil(env, 'stream:1', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=1)
+    runUntil(env, 'stream:2', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'get_stream'), timeout=1)
 
 @gearsTest()
 def testRDBSaveAndLoad(env):

@@ -1,14 +1,18 @@
 extern crate redis_module;
 
-use redis_module::raw::RedisModule_GetDetachedThreadSafeContext;
+use redis_module::raw::{
+    RedisModule_GetDetachedThreadSafeContext,
+    RedisModule__Assert,
+};
 use threadpool::ThreadPool;
 
 use redis_module::{
     context::keys_cursor::KeysCursor, context::server_events::FlushSubevent,
     context::server_events::LoadingSubevent, context::server_events::ServerEventData,
-    context::server_events::ServerRole, context::CallOptions, raw::KeyType::Stream, redis_command,
-    redis_event_handler, redis_module, Context, InfoContext, NextArg, NotifyEvent, RedisError,
-    RedisResult, RedisString, RedisValue, Status, ThreadSafeContext,
+    context::server_events::ServerRole, context::AclPermissions, context::CallOptions,
+    raw::KeyType::Stream, redis_command, redis_event_handler, redis_module, Context, InfoContext,
+    NextArg, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue, Status,
+    ThreadSafeContext,
 };
 
 use redisgears_plugin_api::redisgears_plugin_api::{
@@ -26,7 +30,7 @@ use libloading::{Library, Symbol};
 
 use std::collections::HashMap;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::stream_reader::{ConsumerData, StreamReaderCtx};
 use std::iter::Skip;
@@ -80,6 +84,7 @@ impl GearsFunctionCtx {
 }
 
 struct GearsLibraryCtx {
+    user: Arc<RefCellWrapper<String>>,
     meta_data: GearsLibraryMataData,
     functions: HashMap<String, GearsFunctionCtx>,
     stream_consumers:
@@ -159,7 +164,7 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
                     name, o_c.prefix, prefix)
                 ));
             }
-            let old_ctx = o_c.set_consumer(GearsStreamConsumer { ctx });
+            let old_ctx = o_c.set_consumer(GearsStreamConsumer::new(&self.user, 0, ctx));
             let old_window = o_c.set_window(window);
             let old_trim = o_c.set_trim(trim);
             self.revert_stream_consumers
@@ -172,7 +177,7 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             let consumer_name = name.to_string();
             let consumer = stream_ctx.add_consumer(
                 prefix,
-                GearsStreamConsumer { ctx },
+                GearsStreamConsumer::new(&self.user, 0, ctx),
                 window,
                 trim,
                 Some(Box::new(move |stream_name, ms, seq| {
@@ -213,16 +218,27 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             ));
         }
 
+        let user_name = Arc::clone(&self.user);
+        let mut permissions = AclPermissions::new();
+        permissions.add_full_permission();
         let fire_event_callback: NotificationCallback =
             Box::new(move |event, key, done_callback| {
+                let user = user_name.ref_cell.borrow();
+                let key_redis_str = RedisString::create(std::ptr::null_mut(), key);
+                if let Err(e) = get_ctx().acl_check_key_permission(&user, &key_redis_str, &permissions) {
+                    done_callback(Err(format!(
+                        "User '{}' has no permissions on key '{}', {}.", user, key, e
+                    )));
+                    return;
+                }
                 let val = keys_notifications_consumer_ctx.on_notification_fired(
                     event,
                     key,
-                    Box::new(KeysNotificationsRunCtx),
+                    Box::new(KeysNotificationsRunCtx::new(&user, 0)),
                 );
                 keys_notifications_consumer_ctx.post_command_notification(
                     val,
-                    Box::new(KeysNotificationsRunCtx),
+                    Box::new(KeysNotificationsRunCtx::new(&user, 0)),
                     done_callback,
                 )
             });
@@ -234,6 +250,7 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
         {
             let mut o_c = old_notification_consumer.borrow_mut();
             let _old_consumer_callback = o_c.set_callback(fire_event_callback);
+            // todo: set new key
             // todo: add old consumer to some list for revert (if needed)
             Arc::clone(old_notification_consumer)
         } else {
@@ -261,7 +278,7 @@ struct GlobalCtx {
     redis_ctx: Context,
     authenticated_redis_ctx: Context,
     plugins: Vec<Library>,
-    pool: ThreadPool,
+    pool: Mutex<ThreadPool>,
     mgmt_pool: ThreadPool,
     stream_ctx: StreamReaderCtx<GearsStreamRecord, GearsStreamConsumer>,
     notifications_ctx: KeysNotificationsCtx,
@@ -293,8 +310,30 @@ fn get_libraries_mut() -> &'static mut HashMap<String, GearsLibrary> {
     &mut get_globals_mut().libraries
 }
 
-pub(crate) fn get_thread_pool() -> &'static ThreadPool {
+pub(crate) fn get_thread_pool() -> &'static Mutex<ThreadPool> {
     &get_globals().pool
+}
+
+struct Sentinel;
+
+impl Drop for Sentinel {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            unsafe {
+                RedisModule__Assert.unwrap()(
+                    "Crashed on panic on the main thread\0".as_ptr() as *const std::os::raw::c_char,
+                    "\0".as_ptr() as *const std::os::raw::c_char,
+                    0,
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn execute_on_pool<F: FnOnce() + Send + 'static>(job: F) {
+    get_thread_pool().lock().unwrap().execute(move||{
+        job();
+    });
 }
 
 pub(crate) fn call_redis_command(
@@ -326,6 +365,21 @@ pub(crate) fn call_redis_command(
 }
 
 fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
+    std::panic::set_hook(Box::new(|panic_info| {
+        get_ctx().log_warning(&format!("Application paniced, {}", panic_info));
+        let (file, line) = match panic_info.location() {
+            Some(l) => (l.file(), l.line()),
+            None => ("", 0),
+        };
+        let file = std::ffi::CString::new(file).unwrap();
+        unsafe{
+            RedisModule__Assert.unwrap()(
+                "Crashed on panic\0".as_ptr() as *const std::os::raw::c_char,
+                file.as_ptr(),
+                line as i32,
+            );
+        }
+    }));
     let mgmt_pool = ThreadPool::new(1);
     unsafe {
         let inner_ctx = RedisModule_GetDetachedThreadSafeContext.unwrap()(ctx.ctx);
@@ -336,7 +390,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
             authenticated_redis_ctx: Context::new(inner_autenticated_ctx),
             backends: HashMap::new(),
             plugins: Vec::new(),
-            pool: ThreadPool::new(1),
+            pool: Mutex::new(ThreadPool::new(1)),
             mgmt_pool: mgmt_pool,
             stream_ctx: StreamReaderCtx::new(
                 Box::new(|key, id, include_id| {
@@ -354,7 +408,9 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
 
                     Ok(match stream_iterator.next() {
                         Some(e) => Some(GearsStreamRecord { record: e }),
-                        None => None,
+                        None => {
+                            None
+                        }
                     })
                 }),
                 Box::new(|key_name, id| {
@@ -592,6 +648,13 @@ fn function_debug_command(
     mut args: Skip<IntoIter<redis_module::RedisString>>,
 ) -> RedisResult {
     let backend_name = args.next_arg()?.try_as_str()?;
+    match backend_name {
+        "panic_on_thread_pool" => {
+            execute_on_pool(|| panic!("debug panic"));
+            return Ok(RedisValue::SimpleStringStatic("OK"));
+        }
+        _ => (),
+    }
     let backend = get_backends_mut().get_mut(backend_name).map_or(
         Err(RedisError::String(format!(
             "Backend '{}' does not exists",
@@ -691,6 +754,8 @@ fn function_list_command(
                     RedisValue::BulkString(l.gears_lib_ctx.meta_data.name.to_string()),
                     RedisValue::BulkString("pending_jobs".to_string()),
                     RedisValue::Integer(l.compile_lib_internals.pending_jobs() as i64),
+                    RedisValue::BulkString("user".to_string()),
+                    RedisValue::BulkString(l.gears_lib_ctx.user.ref_cell.borrow().to_string()),
                     RedisValue::BulkString("functions".to_string()),
                     RedisValue::Array(if verbosity > 0 {
                         l.gears_lib_ctx
@@ -879,7 +944,7 @@ fn function_list_command(
     ))
 }
 
-pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult {
+pub(crate) fn function_load_intrernal(user: String, code: &str, upgrade: bool) -> RedisResult {
     let meta_data = library_extract_matadata(code)?;
     let backend_name = meta_data.engine.as_str();
     let backend = get_backends_mut().get_mut(backend_name);
@@ -915,6 +980,7 @@ pub(crate) fn function_load_intrernal(code: &str, upgrade: bool) -> RedisResult 
         return err;
     }
     let mut gears_library = GearsLibraryCtx {
+        user: Arc::new(RefCellWrapper{ref_cell: RefCell::new(user)}),
         meta_data: meta_data,
         functions: HashMap::new(),
         stream_consumers: HashMap::new(),
@@ -997,7 +1063,8 @@ fn function_load_command(
         Ok(s) => s,
         Err(_) => return Err(RedisError::Str("lib code must a valid string")),
     };
-    match function_load_intrernal(lib_code_slice, upgrade) {
+    let user = ctx.get_current_user()?;
+    match function_load_intrernal(user, lib_code_slice, upgrade) {
         Ok(r) => {
             ctx.replicate_verbatim();
             Ok(r)
