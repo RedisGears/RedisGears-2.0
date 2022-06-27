@@ -101,7 +101,10 @@ impl BackendCtxInterface for V8Backend {
         blob: &str,
         compiled_library_api: Box<dyn CompiledLibraryInterface + Send + Sync>,
     ) -> Result<Box<dyn LibraryCtxInterface>, GearsApiError> {
-        let isolate = V8Isolate::new();
+        let isolate = V8Isolate::new_with_limits(
+            8 * 1024 * 1024, /* 8M */
+            compiled_library_api.get_maxmemory(),
+        );
 
         let script_ctx = {
             let (ctx, script) = {

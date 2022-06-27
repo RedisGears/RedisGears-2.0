@@ -1,4 +1,4 @@
-use crate::{execute_on_pool, get_ctx};
+use crate::{execute_on_pool, get_ctx, get_globals};
 use redisgears_plugin_api::redisgears_plugin_api::backend_ctx::CompiledLibraryInterface;
 use std::collections::LinkedList;
 use std::sync::{Arc, Mutex};
@@ -80,5 +80,9 @@ impl CompiledLibraryInterface for CompiledLibraryAPI {
 
     fn run_on_background(&self, job: Box<dyn FnOnce() + Send>) {
         self.add_job(job);
+    }
+
+    fn get_maxmemory(&self) -> usize {
+        get_globals().config.library_maxmemory.size as usize
     }
 }

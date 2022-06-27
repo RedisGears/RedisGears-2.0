@@ -39,6 +39,8 @@ use crate::keys_notifications::{KeysNotificationsCtx, NotificationCallback, Noti
 use crate::keys_notifications_ctx::KeysNotificationsRunCtx;
 use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
 
+use crate::config::Config;
+
 use rdb::REDIS_GEARS_TYPE;
 
 use std::cell::RefCell;
@@ -46,6 +48,7 @@ use std::cell::RefCell;
 mod background_run_ctx;
 mod background_run_scope_guard;
 mod compiled_library_api;
+mod config;
 mod keys_notifications;
 mod keys_notifications_ctx;
 mod rdb;
@@ -278,10 +281,11 @@ struct GlobalCtx {
     redis_ctx: Context,
     authenticated_redis_ctx: Context,
     plugins: Vec<Library>,
-    pool: Mutex<ThreadPool>,
+    pool: Option<Mutex<ThreadPool>>,
     mgmt_pool: ThreadPool,
     stream_ctx: StreamReaderCtx<GearsStreamRecord, GearsStreamConsumer>,
     notifications_ctx: KeysNotificationsCtx,
+    config: Config,
 }
 
 static mut GLOBALS: Option<GlobalCtx> = None;
@@ -311,7 +315,7 @@ fn get_libraries_mut() -> &'static mut HashMap<String, GearsLibrary> {
 }
 
 pub(crate) fn get_thread_pool() -> &'static Mutex<ThreadPool> {
-    &get_globals().pool
+    &get_globals().pool.as_ref().unwrap()
 }
 
 struct Sentinel;
@@ -364,7 +368,27 @@ pub(crate) fn call_redis_command(
     }
 }
 
+fn js_post_init(_ctx: &Context) -> Status {
+    let globals = get_globals_mut();
+    globals.pool = Some(Mutex::new(ThreadPool::new(
+        globals.config.execution_threads.size,
+    )));
+    Status::Ok
+}
+
 fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
+    match ctx.get_redis_version() {
+        Ok(v) => {
+            if v.major < 7 {
+                ctx.log_warning("Redis version must be 7.0.0 or greater");
+                return Status::Err;
+            }
+        }
+        Err(e) => {
+            ctx.log_warning(&format!("Failed getting Redis version, version is probably to old, please use Redis 7.0 or above. {}", e));
+            return Status::Err;
+        }
+    }
     std::panic::set_hook(Box::new(|panic_info| {
         get_ctx().log_warning(&format!("Application paniced, {}", panic_info));
         let (file, line) = match panic_info.location() {
@@ -390,7 +414,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
             authenticated_redis_ctx: Context::new(inner_autenticated_ctx),
             backends: HashMap::new(),
             plugins: Vec::new(),
-            pool: Mutex::new(ThreadPool::new(1)),
+            pool: None,
             mgmt_pool: mgmt_pool,
             stream_ctx: StreamReaderCtx::new(
                 Box::new(|key, id, include_id| {
@@ -432,6 +456,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                 }),
             ),
             notifications_ctx: KeysNotificationsCtx::new(),
+            config: Config::new(),
         };
 
         let v8_path = match args.into_iter().next() {
@@ -1228,6 +1253,7 @@ redis_module! {
     version: 999999,
     data_types: [REDIS_GEARS_TYPE],
     init: js_init,
+    post_init: js_post_init,
     info: js_info,
     commands: [
         ["rg.function", function_command, "readonly deny-script", 0,0,0],
@@ -1243,5 +1269,9 @@ redis_module! {
         [@Loading: on_loading_event],
         [@Flush: on_flush_event],
         // [@Command: on_command_called],
+    ],
+    numeric_configurations: [
+        &get_globals().config.execution_threads,
+        &get_globals().config.library_maxmemory
     ]
 }

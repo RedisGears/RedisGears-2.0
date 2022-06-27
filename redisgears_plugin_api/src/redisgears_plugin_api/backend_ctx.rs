@@ -6,6 +6,7 @@ use std::alloc::GlobalAlloc;
 pub trait CompiledLibraryInterface {
     fn log(&self, msg: &str);
     fn run_on_background(&self, job: Box<dyn FnOnce() + Send>);
+    fn get_maxmemory(&self) -> usize;
 }
 
 pub trait BackendCtxInterface {
