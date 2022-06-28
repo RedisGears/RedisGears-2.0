@@ -11,6 +11,10 @@ redis-module = { git = "https://github.com/RedisLabsModules/redismodule-rs", bra
 libloading = "0.7"
 redisgears_plugin_api = {path="../redisgears_plugin_api/"}
 threadpool = "1.8.1"
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 
 [build-dependencies]
 

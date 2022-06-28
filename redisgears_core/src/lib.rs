@@ -35,6 +35,9 @@ use std::vec::IntoIter;
 
 use crate::compiled_library_api::CompiledLibraryAPI;
 use crate::compiled_library_api::CompiledLibraryInternals;
+use crate::gears_box::{
+    do_http_get_text, gears_box_get_library, gears_box_search, GearsBoxLibraryInfo,
+};
 use crate::keys_notifications::{KeysNotificationsCtx, NotificationCallback, NotificationConsumer};
 use crate::keys_notifications_ctx::KeysNotificationsRunCtx;
 use crate::stream_run_ctx::{GearsStreamConsumer, GearsStreamRecord};
@@ -49,6 +52,7 @@ mod background_run_ctx;
 mod background_run_scope_guard;
 mod compiled_library_api;
 mod config;
+mod gears_box;
 mod keys_notifications;
 mod keys_notifications_ctx;
 mod rdb;
@@ -98,6 +102,7 @@ struct GearsLibrary {
     gears_lib_ctx: GearsLibraryCtx,
     _lib_ctx: Box<dyn LibraryCtxInterface>,
     compile_lib_internals: Arc<CompiledLibraryInternals>,
+    gears_box_lib: Option<GearsBoxLibraryInfo>,
 }
 
 fn redis_value_to_call_reply(r: RedisValue) -> CallResult {
@@ -961,13 +966,25 @@ fn function_list_command(
                         l.gears_lib_ctx.meta_data.code.to_string(),
                     ));
                 }
+                if verbosity > 0 {
+                    res.push(RedisValue::BulkString("gears_box_info".to_string()));
+                    let gears_box_info_str = serde_json::to_string(&l.gears_box_lib).unwrap();
+                    res.push(to_redis_value(
+                        serde_json::from_str(&gears_box_info_str).unwrap(),
+                    ));
+                }
                 RedisValue::Array(res)
             })
             .collect::<Vec<RedisValue>>(),
     ))
 }
 
-pub(crate) fn function_load_intrernal(user: String, code: &str, upgrade: bool) -> RedisResult {
+pub(crate) fn function_load_intrernal(
+    user: String,
+    code: &str,
+    upgrade: bool,
+    gears_box_lib: Option<GearsBoxLibraryInfo>,
+) -> RedisResult {
     let meta_data = library_extract_matadata(code)?;
     let backend_name = meta_data.engine.as_str();
     let backend = get_backends_mut().get_mut(backend_name);
@@ -1058,6 +1075,7 @@ pub(crate) fn function_load_intrernal(user: String, code: &str, upgrade: bool) -
             gears_lib_ctx: gears_library,
             _lib_ctx: lib_ctx,
             compile_lib_internals: compile_lib_internals,
+            gears_box_lib: gears_box_lib,
         },
     );
     Ok(RedisValue::SimpleStringStatic("OK"))
@@ -1089,7 +1107,63 @@ fn function_load_command(
         Err(_) => return Err(RedisError::Str("lib code must a valid string")),
     };
     let user = ctx.get_current_user()?;
-    match function_load_intrernal(user, lib_code_slice, upgrade) {
+    match function_load_intrernal(user, lib_code_slice, upgrade, None) {
+        Ok(r) => {
+            ctx.replicate_verbatim();
+            Ok(r)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn to_redis_value(val: serde_json::Value) -> RedisValue {
+    match val {
+        serde_json::Value::Bool(b) => RedisValue::Integer(if b { 1 } else { 0 }),
+        serde_json::Value::Number(n) => {
+            if n.is_i64() {
+                RedisValue::Integer(n.as_i64().unwrap())
+            } else {
+                RedisValue::BulkString(n.as_f64().unwrap().to_string())
+            }
+        }
+        serde_json::Value::String(s) => RedisValue::BulkString(s),
+        serde_json::Value::Null => RedisValue::Null,
+        serde_json::Value::Array(a) => {
+            let mut res = Vec::new();
+            for v in a {
+                res.push(to_redis_value(v));
+            }
+            RedisValue::Array(res)
+        }
+        serde_json::Value::Object(o) => {
+            let mut res = Vec::new();
+            for (k, v) in o.into_iter() {
+                res.push(RedisValue::BulkString(k));
+                res.push(to_redis_value(v));
+            }
+            RedisValue::Array(res)
+        }
+    }
+}
+
+fn function_search_lib_command(
+    _ctx: &Context,
+    mut args: Skip<IntoIter<redis_module::RedisString>>,
+) -> RedisResult {
+    let search_token = args.next_arg()?.try_as_str()?;
+    let search_result = gears_box_search(search_token)?;
+    Ok(to_redis_value(search_result))
+}
+
+fn function_install_lib_command(
+    ctx: &Context,
+    mut args: Skip<IntoIter<redis_module::RedisString>>,
+) -> RedisResult {
+    let id = args.next_arg()?.try_as_str()?;
+    let gear_box_lib = gears_box_get_library(id)?;
+    let function_code = do_http_get_text(&gear_box_lib.versions.get(0).unwrap().url)?;
+    let user = ctx.get_current_user()?;
+    match function_load_intrernal(user, &function_code, false, Some(gear_box_lib)) {
         Ok(r) => {
             ctx.replicate_verbatim();
             Ok(r)
@@ -1107,6 +1181,19 @@ fn function_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         "list" => function_list_command(ctx, args),
         "del" => function_del_command(ctx, args),
         "debug" => function_debug_command(ctx, args),
+        _ => Err(RedisError::String(format!(
+            "Unknown subcommand {}",
+            sub_command
+        ))),
+    }
+}
+
+fn gears_box_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let sub_command = args.next_arg()?.try_as_str()?.to_lowercase();
+    match sub_command.as_ref() {
+        "search" => function_search_lib_command(ctx, args),
+        "install" => function_install_lib_command(ctx, args),
         _ => Err(RedisError::String(format!(
             "Unknown subcommand {}",
             sub_command
@@ -1257,6 +1344,7 @@ redis_module! {
     info: js_info,
     commands: [
         ["rg.function", function_command, "readonly deny-script", 0,0,0],
+        ["rg.box", gears_box_command, "readonly deny-script", 0,0,0],
         ["_rg_internals.update_stream_last_read_id", update_stream_last_read_id, "readonly", 0,0,0],
     ],
     event_handlers: [
@@ -1270,8 +1358,11 @@ redis_module! {
         [@Flush: on_flush_event],
         // [@Command: on_command_called],
     ],
+    string_configurations: [
+        &get_globals().config.gears_box_address,
+    ],
     numeric_configurations: [
         &get_globals().config.execution_threads,
-        &get_globals().config.library_maxmemory
+        &get_globals().config.library_maxmemory,
     ]
 }

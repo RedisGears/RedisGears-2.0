@@ -47,6 +47,12 @@ extern "C" fn aux_save(rdb: *mut raw::RedisModuleIO, _when: c_int) {
         raw::save_string(rdb, &val.gears_lib_ctx.meta_data.name);
         raw::save_string(rdb, &val.gears_lib_ctx.meta_data.code);
         raw::save_string(rdb, &val.gears_lib_ctx.user.ref_cell.borrow());
+        if let Some(gears_box_info) = &val.gears_box_lib {
+            raw::save_unsigned(rdb, 1);
+            raw::save_string(rdb, &serde_json::to_string(gears_box_info).unwrap());
+        } else {
+            raw::save_unsigned(rdb, 0);
+        }
         // save the number of streams consumer
         raw::save_unsigned(rdb, val.gears_lib_ctx.stream_consumers.len() as u64);
         for (name, stream_consumer) in val.gears_lib_ctx.stream_consumers.iter() {
@@ -130,7 +136,43 @@ unsafe extern "C" fn aux_load(rdb: *mut raw::RedisModuleIO, encver: c_int, _when
                 return raw::REDISMODULE_ERR as i32;
             }
         };
-        match function_load_intrernal(user, &code, false) {
+
+        // load gears box info
+        let has_gears_box_info = match raw::load_unsigned(rdb) {
+            Ok(n) => n,
+            Err(e) => {
+                get_ctx().log_notice(&format!(
+                    "Failed reading number of steams consumers from rdb, {}",
+                    e
+                ));
+                return raw::REDISMODULE_ERR as i32;
+            }
+        };
+
+        let gears_box_info = if has_gears_box_info > 0 {
+            let gears_box_info_str = match raw::load_string_buffer(rdb) {
+                Ok(s) => match s.to_string() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        get_ctx().log_notice(&format!(
+                            "Failed converting library gears box to string, {}",
+                            e
+                        ));
+                        return raw::REDISMODULE_ERR as i32;
+                    }
+                },
+                Err(e) => {
+                    get_ctx()
+                        .log_notice(&format!("Failed reading library gears box from rdb, {}", e));
+                    return raw::REDISMODULE_ERR as i32;
+                }
+            };
+            Some(serde_json::from_str(&gears_box_info_str).unwrap())
+        } else {
+            None
+        };
+
+        match function_load_intrernal(user, &code, false, gears_box_info) {
             Ok(_) => {}
             Err(e) => {
                 get_ctx().log_notice(&format!("Failed loading librart, {}", e));
