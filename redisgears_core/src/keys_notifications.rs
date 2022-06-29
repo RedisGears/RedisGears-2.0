@@ -1,4 +1,4 @@
-use crate::RefCellWrapper;
+use redisgears_plugin_api::redisgears_plugin_api::RefCellWrapper;
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 

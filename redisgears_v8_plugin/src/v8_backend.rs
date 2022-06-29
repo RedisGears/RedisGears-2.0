@@ -1,6 +1,7 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
     backend_ctx::BackendCtxInterface, backend_ctx::CompiledLibraryInterface,
-    load_library_ctx::LibraryCtxInterface, CallResult, GearsApiError,
+    load_library_ctx::LibraryCtxInterface, CallResult, GearsApiError, backend_ctx::BackendCtx,
+    backend_ctx::LibraryFatalFailurePolicy,
 };
 
 use crate::v8_script_ctx::V8ScriptCtx;
@@ -15,24 +16,24 @@ use crate::v8_script_ctx::V8LibraryCtx;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::str;
 
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Weak, Mutex};
+use std::sync::atomic::Ordering;
 
 struct Globals {
-    allocator: Option<&'static dyn GlobalAlloc>,
-    log: Option<Box<dyn Fn(&str) + 'static>>,
+    backend_ctx: Option<BackendCtx>,
 }
 
 unsafe impl GlobalAlloc for Globals {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match self.allocator.as_ref() {
-            Some(a) => a.alloc(layout),
+        match self.backend_ctx.as_ref() {
+            Some(a) => a.allocator.alloc(layout),
             None => System.alloc(layout),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        match self.allocator.as_ref() {
-            Some(a) => a.dealloc(ptr, layout),
+        match self.backend_ctx.as_ref() {
+            Some(a) => a.allocator.dealloc(ptr, layout),
             None => System.dealloc(ptr, layout),
         }
     }
@@ -40,29 +41,36 @@ unsafe impl GlobalAlloc for Globals {
 
 #[global_allocator]
 static mut GLOBAL: Globals = Globals {
-    allocator: None,
-    log: None,
+    backend_ctx: None,
 };
 
 pub(crate) fn log(msg: &str) {
-    unsafe { (GLOBAL.log.as_ref().unwrap())(msg) };
+    unsafe { (GLOBAL.backend_ctx.as_ref().unwrap().log)(msg) };
+}
+
+pub(crate) fn get_fatal_failure_policy() -> LibraryFatalFailurePolicy{
+    unsafe { (GLOBAL.backend_ctx.as_ref().unwrap().get_on_oom_policy)() }
+}
+
+pub(crate) fn gil_lock_timeout() -> u128 {
+    unsafe { (GLOBAL.backend_ctx.as_ref().unwrap().get_lock_timeout)() }
 }
 
 pub(crate) struct V8Backend {
-    pub(crate) script_ctx_vec: Vec<Weak<V8ScriptCtx>>,
+    pub(crate) script_ctx_vec: Arc<Mutex<Vec<Weak<V8ScriptCtx>>>>,
 }
 
 impl V8Backend {
     fn isolates_gc(&mut self) {
-        let indexes = self
-            .script_ctx_vec
+        let mut l = self.script_ctx_vec.lock().unwrap();
+        let indexes = l
             .iter()
             .enumerate()
             .filter(|(_i, v)| v.strong_count() == 0)
             .map(|(i, _v)| i)
             .collect::<Vec<usize>>();
         for i in indexes.iter().rev() {
-            self.script_ctx_vec.swap_remove(*i);
+            l.swap_remove(*i);
         }
     }
 }
@@ -74,12 +82,10 @@ impl BackendCtxInterface for V8Backend {
 
     fn initialize(
         &self,
-        allocator: &'static dyn GlobalAlloc,
-        log_callback: Box<dyn Fn(&str) + 'static>,
+        backend_ctx: BackendCtx,
     ) -> Result<(), GearsApiError> {
         unsafe {
-            GLOBAL.allocator = Some(allocator);
-            GLOBAL.log = Some(log_callback);
+            GLOBAL.backend_ctx = Some(backend_ctx);
         }
         v8_init_with_error_handlers(
             Box::new(|line, msg| {
@@ -93,6 +99,50 @@ impl BackendCtxInterface for V8Backend {
                 panic!("{}", msg);
             }),
         );
+
+        let script_ctxs = Arc::clone(&self.script_ctx_vec);
+        std::thread::spawn(move||{
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let l = script_ctxs.lock().unwrap();
+                for script_ctx_weak in l.iter() {
+                    let script_ctx = match script_ctx_weak.upgrade() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    if script_ctx.is_running.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                        let interrupt_script_ctx_clone = Weak::clone(&script_ctx_weak);
+                        script_ctx.isolate.request_interrupt(move|isolate|{
+                            let script_ctx = match interrupt_script_ctx_clone.upgrade() {
+                                Some(s) => s,
+                                None => return,
+                            };
+                            if script_ctx.is_gil_locked() && !script_ctx.is_lock_timedout() {
+                                // gil is current locked. we should check for timeout.
+                                // todo: call Redis back to reply to pings and some other commands.
+                                let gil_lock_duration = script_ctx.git_lock_duration_ms();
+                                let gil_lock_configured_timeout = gil_lock_timeout();
+                                if gil_lock_duration > gil_lock_configured_timeout {
+                                    script_ctx.set_lock_timedout();
+                                    script_ctx.compiled_library_api.log(&format!("Script locks Redis for about {}ms which is more then the configured timeout {}ms.", gil_lock_duration, gil_lock_configured_timeout));
+                                    match get_fatal_failure_policy() {
+                                        LibraryFatalFailurePolicy::Kill => {
+                                            script_ctx.compiled_library_api.log("Fatal error policy do not allow to abort the script, we will allow the script to continue running, best effort approach.");
+                                        }
+                                        LibraryFatalFailurePolicy::Abort => {
+                                            script_ctx.compiled_library_api.log("Aborting script with timeout error.");
+                                            isolate.terminate_execution();
+                                        }
+                                    }
+                                }
+                            }
+                            script_ctx.before_run();
+                        });
+                    }
+                }
+            }
+        });
+
         Ok(())
     }
 
@@ -132,8 +182,12 @@ impl BackendCtxInterface for V8Backend {
                 (ctx, script)
             };
             let script_ctx = Arc::new(V8ScriptCtx::new(isolate, ctx, script, compiled_library_api));
-            self.script_ctx_vec.push(Arc::downgrade(&script_ctx));
-            if self.script_ctx_vec.len() > 100 {
+            let len = {
+                let mut l = self.script_ctx_vec.lock().unwrap();
+                l.push(Arc::downgrade(&script_ctx));
+                l.len()
+            };
+            if len > 100 {
                 // let try to do some gc
                 self.isolates_gc();
             }
@@ -162,13 +216,22 @@ impl BackendCtxInterface for V8Backend {
                         };
 
                         script_ctx.compiled_library_api.log(&msg);
-                        script_ctx.isolate.terminate_execution();
 
-                        script_ctx
-                            .compiled_library_api
-                            .log("Increase max memory to allow aborting the script");
+                        match get_fatal_failure_policy() {
+                            LibraryFatalFailurePolicy::Kill => {
+                                script_ctx.compiled_library_api.log("Fatal error policy do not allow to abort the script, server will be killed shortly.");
+                                curr_limit as usize
+                            }
+                            LibraryFatalFailurePolicy::Abort => {
+                                script_ctx.isolate.terminate_execution();
 
-                        (curr_limit as f64 * 1.2) as usize
+                                script_ctx
+                                    .compiled_library_api
+                                    .log("Temporarly increase max memory aborting the script");
+
+                                (curr_limit as f64 * 1.2) as usize
+                            }
+                        }
                     });
 
                 initialize_globals(&script_ctx, &globals, &ctx_scope);
@@ -195,14 +258,13 @@ impl BackendCtxInterface for V8Backend {
             .to_lowercase();
         match sub_command.as_ref() {
             "isolates_stats" => {
-                let active = self
-                    .script_ctx_vec
+                let l = self.script_ctx_vec.lock().unwrap();
+                let active = l
                     .iter()
                     .filter(|v| v.strong_count() > 0)
                     .collect::<Vec<&Weak<V8ScriptCtx>>>()
                     .len() as i64;
-                let not_active = self
-                    .script_ctx_vec
+                let not_active = l
                     .iter()
                     .filter(|v| v.strong_count() == 0)
                     .collect::<Vec<&Weak<V8ScriptCtx>>>()
@@ -215,8 +277,8 @@ impl BackendCtxInterface for V8Backend {
                 ]))
             }
             "isolates_strong_count" => {
-                let isolates_strong_count = self
-                    .script_ctx_vec
+                let l = self.script_ctx_vec.lock().unwrap();
+                let isolates_strong_count = l
                     .iter()
                     .map(|v| CallResult::Long(v.strong_count() as i64))
                     .collect::<Vec<CallResult>>();

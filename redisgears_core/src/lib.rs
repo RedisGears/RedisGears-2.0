@@ -18,8 +18,10 @@ use redisgears_plugin_api::redisgears_plugin_api::{
     load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface,
     load_library_ctx::RegisteredKeys, load_library_ctx::FUNCTION_FLAG_ALLOW_OOM,
     load_library_ctx::FUNCTION_FLAG_NO_WRITES, stream_ctx::StreamCtxInterface, CallResult,
-    GearsApiError,
+    GearsApiError, backend_ctx::BackendCtx,
 };
+
+use redisgears_plugin_api::redisgears_plugin_api::RefCellWrapper;
 
 use crate::run_ctx::RunCtx;
 
@@ -59,13 +61,6 @@ mod rdb;
 mod run_ctx;
 mod stream_reader;
 mod stream_run_ctx;
-
-pub(crate) struct RefCellWrapper<T> {
-    pub(crate) ref_cell: RefCell<T>,
-}
-
-unsafe impl<T> Sync for RefCellWrapper<T> {}
-unsafe impl<T> Send for RefCellWrapper<T> {}
 
 struct GearsLibraryMataData {
     name: String,
@@ -497,8 +492,12 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                 return Status::Err;
             }
             if let Err(e) = backend.initialize(
-                &redis_module::ALLOC,
-                Box::new(|msg| get_ctx().log_notice(msg)),
+                BackendCtx {
+                    allocator: &redis_module::ALLOC,
+                    log: Box::new(|msg| get_ctx().log_notice(msg)),
+                    get_on_oom_policy: Box::new(|| get_globals().config.libraray_fatal_failure_policy.policy.clone()),
+                    get_lock_timeout: Box::new(|| get_globals().config.lock_regis_timeout.size),
+                }
             ) {
                 ctx.log_warning(&format!("Failed loading {} backend, {}", name, e.get_msg()));
                 return Status::Err;
@@ -1364,5 +1363,9 @@ redis_module! {
     numeric_configurations: [
         &get_globals().config.execution_threads,
         &get_globals().config.library_maxmemory,
+        &get_globals().config.lock_regis_timeout,
+    ],
+    enum_configurations: [
+        &get_globals().config.libraray_fatal_failure_policy,
     ]
 }

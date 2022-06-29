@@ -1,5 +1,6 @@
 from common import gearsTest
 from common import toDictionary
+from common import runUntil
 
 '''
 todo:
@@ -206,3 +207,116 @@ redis.register_function("async_set_trigger", function(client, key, val){
     env.expect('replicaof', '127.0.0.1', '33333')
     env.expect('RG.FUNCTION', 'CALL', 'lib', 'async_set_continue').error().contains('Can not lock redis for write on replica')
     env.expect('replicaof', 'no', 'one')
+
+@gearsTest()
+def testScriptTimeout(env):
+    """#!js name=lib
+redis.register_function("test1", function(client){
+    while (true);
+});
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'test1').error().contains('Execution was terminated due to OOM or timeout')
+
+@gearsTest()
+def testAsyncScriptTimeout(env):
+    """#!js name=lib
+redis.register_function("test1", async function(client){
+    client.block(function(){
+        while (true);
+    });
+});
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'test1').error().contains('Execution was terminated due to OOM or timeout')
+
+@gearsTest()
+def testTimeoutErrorNotCatchable(env):
+    """#!js name=lib
+redis.register_function("test1", async function(client){
+    try {
+        client.block(function(){
+            while (true);
+        });
+    } catch (e) {
+        return "catch timeout error"
+    }
+});
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'test1').error().contains('Execution was terminated due to OOM or timeout')
+
+@gearsTest()
+def testScriptLoadTimeout(env):
+    script = """#!js name=lib
+while(true);
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.expect('RG.FUNCTION', 'LOAD', script).error().contains('Execution was terminated due to OOM or timeout')
+
+@gearsTest()
+def testTimeoutOnStream(env):
+    """#!js name=lib
+redis.register_stream_consumer("consumer", "stream", 1, true, function(){
+    while(true);
+})
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.cmd('xadd', 'stream1', '*', 'foo', 'bar')
+    res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vv'), 6)
+    env.assertContains('Execution was terminated due to OOM or timeout', res[0]['stream_consumers'][0]['streams'][0]['last_error'])
+
+@gearsTest()
+def testTimeoutOnStreamAsync(env):
+    """#!js name=lib
+redis.register_stream_consumer("consumer", "stream", 1, true, async function(c){
+    c.block(function(){
+        while(true);
+    })
+})
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.cmd('xadd', 'stream1', '*', 'foo', 'bar')
+    runUntil(env, 1, lambda: toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['total_record_processed'])
+    res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)
+    env.assertContains('Execution was terminated due to OOM or timeout', res[0]['stream_consumers'][0]['streams'][0]['last_error'])
+
+@gearsTest()
+def testTimeoutOnNotificationConsumer(env):
+    """#!js name=lib
+redis.register_notifications_consumer("consumer", "", function(client, data) {
+    while(true);
+});
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.cmd('set', 'x', '1')
+    res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vv'), 6)
+    env.assertContains('Execution was terminated due to OOM or timeout', res[0]['notifications_consumers'][0]['last_error'])
+
+@gearsTest()
+def testTimeoutOnNotificationConsumerAsync(env):
+    """#!js name=lib
+redis.register_notifications_consumer("consumer", "", async function(client, data) {
+    client.block(function(){
+        while(true);
+    })
+});
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '100').equal('OK')
+    env.cmd('set', 'x', '1')
+    runUntil(env, 1, lambda: toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['notifications_consumers'][0]['num_failed'])
+    res = toDictionary(env.cmd('RG.FUNCTION', 'LIST', 'vv'), 6)
+    env.assertContains('Execution was terminated due to OOM or timeout', res[0]['notifications_consumers'][0]['last_error'])
+
+@gearsTest()
+def testOOM(env):
+    """#!js name=lib
+redis.register_function("test1", function(client){
+    a = [1]
+    while (true) {
+        a = [a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a]
+    }
+});
+    """
+    env.expect('config', 'set', 'redisgears_2.lock-redis-timeout', '1000000000').equal('OK')
+    env.expect('RG.FUNCTION', 'CALL', 'lib', 'test1').error().contains('Execution was terminated due to OOM or timeout')

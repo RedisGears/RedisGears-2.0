@@ -9,12 +9,24 @@ pub trait CompiledLibraryInterface {
     fn get_maxmemory(&self) -> usize;
 }
 
+#[derive(Clone)]
+pub enum LibraryFatalFailurePolicy {
+    Abort = 0,
+    Kill = 1,
+}
+
+pub struct BackendCtx {
+    pub allocator: &'static dyn GlobalAlloc,
+    pub log: Box<dyn Fn(&str) + 'static>,
+    pub get_on_oom_policy: Box<dyn Fn() -> LibraryFatalFailurePolicy + 'static>,
+    pub get_lock_timeout: Box<dyn Fn() -> u128 + 'static>,
+}
+
 pub trait BackendCtxInterface {
     fn get_name(&self) -> &'static str;
     fn initialize(
         &self,
-        allocator: &'static dyn GlobalAlloc,
-        log: Box<dyn Fn(&str) + 'static>,
+        backend_ctx: BackendCtx,
     ) -> Result<(), GearsApiError>;
     fn compile_library(
         &mut self,

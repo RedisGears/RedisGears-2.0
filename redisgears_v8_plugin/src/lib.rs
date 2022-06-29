@@ -16,6 +16,7 @@ mod v8_script_ctx;
 mod v8_stream_ctx;
 
 use crate::v8_backend::V8Backend;
+use std::sync::{Arc, Mutex};
 
 pub(crate) fn get_exception_msg(isolate: &V8Isolate, trycatch: V8TryCatch) -> String {
     if trycatch.has_terminated() {
@@ -52,6 +53,6 @@ pub(crate) fn get_function_flags(
 #[allow(improper_ctypes_definitions)]
 pub extern "C" fn initialize_plugin() -> *mut dyn BackendCtxInterface {
     Box::into_raw(Box::new(V8Backend {
-        script_ctx_vec: Vec::new(),
+        script_ctx_vec: Arc::new(Mutex::new(Vec::new())),
     }))
 }

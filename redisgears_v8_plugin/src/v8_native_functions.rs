@@ -136,7 +136,11 @@ pub(crate) fn get_backgrounnd_client(
                 let c = get_redis_client(&script_ctx_ref, ctx_scope, &r_client);
 
                 ctx_scope.set_private_data(0, Some(&true)); // indicate we are blocked
+
+                script_ctx_ref.after_lock_gil();
                 let res = f.call(ctx_scope, Some(&[&c.to_value()]));
+                script_ctx_ref.before_release_gil();
+
                 ctx_scope.set_private_data::<bool>(0, None);
 
                 r_client.borrow_mut().make_invalid();

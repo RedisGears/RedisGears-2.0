@@ -1,10 +1,12 @@
 use redis_module::context::configuration::{
-    ConfigFlags, RedisConfigCtx, RedisNumberConfigCtx, RedisStringConfigCtx,
+    ConfigFlags, RedisConfigCtx, RedisNumberConfigCtx, RedisStringConfigCtx, RedisEnumConfigCtx,
 };
 use redis_module::RedisString;
 
 use redis_module::context::Context;
 use redis_module::RedisError;
+
+use redisgears_plugin_api::redisgears_plugin_api::backend_ctx::LibraryFatalFailurePolicy;
 
 pub(crate) struct ExecutionThreads {
     pub(crate) size: usize,
@@ -149,10 +151,116 @@ impl RedisStringConfigCtx for GearBoxAddress {
     }
 }
 
+pub(crate) struct LibraryOnFatalFailurePolicy {
+    pub(crate) policy:  LibraryFatalFailurePolicy,
+    flags: ConfigFlags,
+}
+
+impl LibraryOnFatalFailurePolicy {
+    fn new() -> LibraryOnFatalFailurePolicy {
+        LibraryOnFatalFailurePolicy {
+            policy: LibraryFatalFailurePolicy::Abort,
+            flags: ConfigFlags::new(),
+        }
+    }
+}
+
+impl RedisConfigCtx for LibraryOnFatalFailurePolicy {
+    fn name(&self) -> &'static str {
+        "library-fatal_failure-policy"
+    }
+
+    fn apply(&self, _ctx: &Context) -> Result<(), RedisError> {
+        Ok(())
+    }
+
+    fn flags(&self) -> &ConfigFlags {
+        &self.flags
+    }
+}
+
+impl RedisEnumConfigCtx for LibraryOnFatalFailurePolicy {
+    fn default(&self) -> i32 {
+        self.policy.clone() as i32
+    }
+
+    fn values(&self) -> Vec<(&str, i32)> {
+        vec![
+            ("abort", LibraryFatalFailurePolicy::Abort as i32),
+            ("kill", LibraryFatalFailurePolicy::Kill as i32),
+        ]
+    }
+
+    fn get(&self, _name: &str) -> i32 {
+        self.policy.clone() as i32
+    }
+
+    fn set(&mut self, _name: &str, value: i32) -> Result<(), RedisError> {
+        match value {
+            x if x == LibraryFatalFailurePolicy::Abort as i32 => self.policy = LibraryFatalFailurePolicy::Abort,
+            x if x == LibraryFatalFailurePolicy::Kill as i32 => self.policy = LibraryFatalFailurePolicy::Kill,
+            _ => return Err(RedisError::Str("unsupported value were given")),
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct LockRedisTimeout {
+    pub(crate) size: u128,
+    flags: ConfigFlags,
+}
+
+impl LockRedisTimeout {
+    fn new() -> LockRedisTimeout {
+        LockRedisTimeout {
+            size: 1000,
+            flags: ConfigFlags::new(),
+        }
+    }
+}
+
+impl RedisConfigCtx for LockRedisTimeout {
+    fn name(&self) -> &'static str {
+        "lock-redis-timeout"
+    }
+
+    fn apply(&self, _ctx: &Context) -> Result<(), RedisError> {
+        Ok(())
+    }
+
+    fn flags(&self) -> &ConfigFlags {
+        &self.flags
+    }
+}
+
+impl RedisNumberConfigCtx for LockRedisTimeout {
+    fn default(&self) -> i64 {
+        500
+    }
+
+    fn min(&self) -> i64 {
+        100
+    }
+    fn max(&self) -> i64 {
+        1000000000
+    }
+
+    fn get(&self, _name: &str) -> i64 {
+        self.size as i64
+    }
+
+    fn set(&mut self, _name: &str, value: i64) -> Result<(), RedisError> {
+        self.size = value as u128;
+        Ok(())
+    }
+}
+
 pub(crate) struct Config {
     pub(crate) execution_threads: ExecutionThreads,
     pub(crate) library_maxmemory: LibraryMaxMemory,
     pub(crate) gears_box_address: GearBoxAddress,
+    pub(crate) libraray_fatal_failure_policy: LibraryOnFatalFailurePolicy,
+    pub(crate) lock_regis_timeout: LockRedisTimeout,
 }
 
 impl Config {
@@ -161,6 +269,8 @@ impl Config {
             execution_threads: ExecutionThreads::new(),
             library_maxmemory: LibraryMaxMemory::new(),
             gears_box_address: GearBoxAddress::new(),
+            libraray_fatal_failure_policy: LibraryOnFatalFailurePolicy::new(),
+            lock_regis_timeout: LockRedisTimeout::new(),
         }
     }
 }

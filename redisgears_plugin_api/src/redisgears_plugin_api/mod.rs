@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 pub mod backend_ctx;
 pub mod function_ctx;
 pub mod keys_notifications_consumer_ctx;
@@ -31,3 +33,10 @@ pub enum CallResult {
     Array(Vec<CallResult>),
     Null,
 }
+
+pub struct RefCellWrapper<T> {
+    pub ref_cell: RefCell<T>,
+}
+
+unsafe impl<T> Sync for RefCellWrapper<T> {}
+unsafe impl<T> Send for RefCellWrapper<T> {}
