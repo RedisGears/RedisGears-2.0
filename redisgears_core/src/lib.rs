@@ -958,6 +958,8 @@ fn function_list_command(
                                         RedisValue::BulkString(name.to_string()),
                                         RedisValue::BulkString("num_triggered".to_string()),
                                         RedisValue::Integer(stats.num_trigger as i64),
+                                        RedisValue::BulkString("num_finished".to_string()),
+                                        RedisValue::Integer(stats.num_finished as i64),
                                         RedisValue::BulkString("num_success".to_string()),
                                         RedisValue::Integer(stats.num_success as i64),
                                         RedisValue::BulkString("num_failed".to_string()),
@@ -967,6 +969,12 @@ fn function_list_command(
                                             Some(s) => s,
                                             None => "None".to_string(),
                                         }),
+                                        RedisValue::BulkString("last_exection_time".to_string()),
+                                        RedisValue::Integer(stats.last_execution_time as i64),
+                                        RedisValue::BulkString("total_exection_time".to_string()),
+                                        RedisValue::Integer(stats.total_execution_time as i64),
+                                        RedisValue::BulkString("avg_exection_time".to_string()),
+                                        RedisValue::Float(stats.total_execution_time as f64 / stats.num_finished as f64),
                                     ])
                                 }
                             })

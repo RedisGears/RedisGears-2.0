@@ -1,6 +1,7 @@
 use redisgears_plugin_api::redisgears_plugin_api::RefCellWrapper;
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
+use std::time::{SystemTime};
 
 pub(crate) type NotificationCallback =
     Box<dyn Fn(&str, &str, Box<dyn FnOnce(Result<(), String>) + Send + Sync>)>;
@@ -15,7 +16,10 @@ pub(crate) struct NotificationConsumerStats {
     pub(crate) num_trigger: usize,
     pub(crate) num_success: usize,
     pub(crate) num_failed: usize,
+    pub(crate) num_finished: usize,
     pub(crate) last_error: Option<String>,
+    pub(crate) last_execution_time: u128,
+    pub(crate) total_execution_time: u128,
 }
 
 pub(crate) struct NotificationConsumer {
@@ -34,7 +38,10 @@ impl NotificationConsumer {
                     num_trigger: 0,
                     num_success: 0,
                     num_failed: 0,
+                    num_finished: 0,
                     last_error: None,
+                    last_execution_time: 0,
+                    total_execution_time: 0,
                 }),
             }),
         }
@@ -67,11 +74,19 @@ fn fire_event(consumer: &Arc<RefCell<NotificationConsumer>>, event: &str, key: &
         stats.num_trigger += 1;
     }
     let stats_ref = Arc::clone(&c.stats);
+    let start_time = SystemTime::now();
     (c.callback.as_ref().unwrap())(
         event,
         key,
         Box::new(move |res| {
+            let duration = match SystemTime::now().duration_since(start_time) {
+                Ok(d) => d.as_millis(),
+                Err(_) => 0,
+            };
             let mut stats = stats_ref.ref_cell.borrow_mut();
+            stats.num_finished += 1;
+            stats.last_execution_time = duration;
+            stats.total_execution_time += duration;
             if let Err(e) = res {
                 stats.num_failed += 1;
                 stats.last_error = Some(e);
