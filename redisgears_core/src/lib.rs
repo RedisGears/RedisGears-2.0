@@ -50,6 +50,8 @@ use rdb::REDIS_GEARS_TYPE;
 
 use std::cell::RefCell;
 
+use crate::keys_notifications::ConsumerKey;
+
 mod background_run_ctx;
 mod background_run_scope_guard;
 mod compiled_library_api;
@@ -90,6 +92,7 @@ struct GearsLibraryCtx {
         HashMap<String, Arc<RefCellWrapper<ConsumerData<GearsStreamRecord, GearsStreamConsumer>>>>,
     revert_stream_consumers: Vec<(String, GearsStreamConsumer, usize, bool)>,
     notifications_consumers: HashMap<String, Arc<RefCell<NotificationConsumer>>>,
+    revert_notifications_consumers: Vec<(String, ConsumerKey, NotificationCallback)>,
     old_lib: Option<Box<GearsLibrary>>,
 }
 
@@ -252,9 +255,13 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
             .map_or(None, |v| v.gears_lib_ctx.notifications_consumers.get(name))
         {
             let mut o_c = old_notification_consumer.borrow_mut();
-            let _old_consumer_callback = o_c.set_callback(fire_event_callback);
-            // todo: set new key
-            // todo: add old consumer to some list for revert (if needed)
+            let old_consumer_callback = o_c.set_callback(fire_event_callback);
+            let new_key = match key {
+                RegisteredKeys::Key(s) => ConsumerKey::Key(s.to_string()),
+                RegisteredKeys::Prefix(s) => ConsumerKey::Prefix(s.to_string()),
+            };
+            let old_key = o_c.set_key(new_key);
+            self.revert_notifications_consumers.push((name.to_string(), old_key, old_consumer_callback));
             Arc::clone(old_notification_consumer)
         } else {
             let globlas = get_globals_mut();
@@ -978,6 +985,27 @@ fn function_list_command(
     ))
 }
 
+pub(crate) fn function_load_revert(mut gears_library: GearsLibraryCtx, libraries: &mut HashMap<String, GearsLibrary>) {
+    if let Some(old_lib) = gears_library.old_lib.take() {
+        for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
+            let stream_data = gears_library.stream_consumers.get(&name).unwrap();
+            let mut s_d = stream_data.ref_cell.borrow_mut();
+            s_d.set_consumer(old_ctx);
+            s_d.set_window(old_window);
+            s_d.set_trim(old_trim);
+        }
+
+        for (name, key, callback) in gears_library.revert_notifications_consumers {
+            let notification_consumer = gears_library.notifications_consumers.get(&name).unwrap();
+            let mut s_d = notification_consumer.borrow_mut();
+            s_d.set_key(key);
+            let _ = s_d.set_callback(callback);
+        }
+
+        libraries.insert(gears_library.meta_data.name, *old_lib);
+    }
+}
+
 pub(crate) fn function_load_intrernal(
     user: String,
     code: &str,
@@ -1027,6 +1055,7 @@ pub(crate) fn function_load_intrernal(
         stream_consumers: HashMap::new(),
         notifications_consumers: HashMap::new(),
         revert_stream_consumers: Vec::new(),
+        revert_notifications_consumers: Vec::new(),
         old_lib: old_lib.map_or(None, |v| Some(Box::new(v))),
     };
     let res = lib_ctx.load_library(&mut gears_library);
@@ -1037,32 +1066,14 @@ pub(crate) fn function_load_intrernal(
                 Err(RedisError::String(msg))
             }
         };
-        if let Some(old_lib) = gears_library.old_lib.take() {
-            for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
-                let stream_data = gears_library.stream_consumers.get(&name).unwrap();
-                let mut s_d = stream_data.ref_cell.borrow_mut();
-                s_d.set_consumer(old_ctx);
-                s_d.set_window(old_window);
-                s_d.set_trim(old_trim);
-            }
-            libraries.insert(gears_library.meta_data.name, *old_lib);
-        }
+        function_load_revert(gears_library, libraries);
         return ret;
     }
     if gears_library.functions.len() == 0
         && gears_library.stream_consumers.len() == 0
         && gears_library.notifications_consumers.len() == 0
     {
-        if let Some(old_lib) = gears_library.old_lib.take() {
-            for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
-                let stream_data = gears_library.stream_consumers.get(&name).unwrap();
-                let mut s_d = stream_data.ref_cell.borrow_mut();
-                s_d.set_consumer(old_ctx);
-                s_d.set_window(old_window);
-                s_d.set_trim(old_trim);
-            }
-            libraries.insert(gears_library.meta_data.name, *old_lib);
-        }
+        function_load_revert(gears_library, libraries);
         return Err(RedisError::Str(
             "No function nor registrations was registered",
         ));

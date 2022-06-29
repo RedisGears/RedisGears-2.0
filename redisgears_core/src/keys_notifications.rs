@@ -19,7 +19,7 @@ pub(crate) struct NotificationConsumerStats {
 }
 
 pub(crate) struct NotificationConsumer {
-    key: ConsumerKey,
+    key: Option<ConsumerKey>,
     callback: Option<NotificationCallback>,
     stats: Arc<RefCellWrapper<NotificationConsumerStats>>,
 }
@@ -27,7 +27,7 @@ pub(crate) struct NotificationConsumer {
 impl NotificationConsumer {
     fn new(key: ConsumerKey, callback: NotificationCallback) -> NotificationConsumer {
         NotificationConsumer {
-            key: key,
+            key: Some(key),
             callback: Some(callback),
             stats: Arc::new(RefCellWrapper {
                 ref_cell: RefCell::new(NotificationConsumerStats {
@@ -43,10 +43,16 @@ impl NotificationConsumer {
     pub(crate) fn set_callback(
         &mut self,
         callback: NotificationCallback,
-    ) -> Option<NotificationCallback> {
+    ) -> NotificationCallback {
         let old_callback = self.callback.take();
         self.callback = Some(callback);
-        old_callback
+        old_callback.unwrap()
+    }
+
+    pub(crate) fn set_key(&mut self, key: ConsumerKey) -> ConsumerKey {
+        let old_key = self.key.take();
+        self.key = Some(key);
+        old_key.unwrap()
     }
 
     pub(crate) fn get_stats(&self) -> NotificationConsumerStats {
@@ -121,7 +127,7 @@ impl KeysNotificationsCtx {
             };
             if {
                 let c = consumer.borrow_mut();
-                match &c.key {
+                match c.key.as_ref().unwrap() {
                     ConsumerKey::Key(k) => key == k,
                     ConsumerKey::Prefix(prefix) => key.starts_with(prefix),
                 }

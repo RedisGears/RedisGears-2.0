@@ -69,6 +69,62 @@ redis.register_function("test", "bar"); // this will fail
     env.assertEqual(isolate_stats['not_active'], 1)
 
 @gearsTest()
+def testLibraryUpgradeFailureWithStreamConsumer(env):
+    """#!js name=foo
+redis.register_stream_consumer("consumer", "stream", 1, false, async function(c){
+    c.block(function(c) {
+        c.call('incr', 'x')
+    })
+})
+    """
+    script = '''#!js name=foo
+redis.register_stream_consumer("consumer", "stream", 1, false, async function(c){
+    c.block(function(c) {
+        c.call('incr', 'x')
+    })
+})
+redis.register_function("test", "bar"); // this will fail
+    '''
+    env.cmd('XADD', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, '1', lambda: env.cmd('get', 'x'))
+    env.expect('RG.FUNCTION', 'LOAD', 'UPGRADE', script).error().contains('must be a function')
+    env.cmd('XADD', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, '2', lambda: env.cmd('get', 'x'))
+
+    # make sure isolate was released
+    isolate_stats = toDictionary(env.cmd('RG.FUNCTION', 'DEBUG', 'js', 'isolates_stats'))
+    env.assertEqual(isolate_stats['active'], 1)
+    env.assertEqual(isolate_stats['not_active'], 1)
+
+@gearsTest()
+def testLibraryUpgradeFailureWithNotificationConsumer(env):
+    """#!js name=foo
+redis.register_notifications_consumer("consumer", "key", async function(c){
+    c.block(function(c) {
+        c.call('incr', 'x')
+    })
+})
+    """
+    script = '''#!js name=foo
+redis.register_notifications_consumer("consumer", "key", async function(c){
+    c.block(function(c) {
+        c.call('incr', 'x')
+    })
+})
+redis.register_function("test", "bar"); // this will fail
+    '''
+    env.cmd('set', 'key1', '1')
+    runUntil(env, '1', lambda: env.cmd('get', 'x'))
+    env.expect('RG.FUNCTION', 'LOAD', 'UPGRADE', script).error().contains('must be a function')
+    env.cmd('set', 'key1', '1')
+    runUntil(env, '2', lambda: env.cmd('get', 'x'))
+
+    # make sure isolate was released
+    isolate_stats = toDictionary(env.cmd('RG.FUNCTION', 'DEBUG', 'js', 'isolates_stats'))
+    env.assertEqual(isolate_stats['active'], 1)
+    env.assertEqual(isolate_stats['not_active'], 1)
+
+@gearsTest()
 def testRedisCallNullReply(env):
     """#!js name=foo
 redis.register_function("test", function(client){
