@@ -427,6 +427,9 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                 Box::new(|key, id, include_id| {
                     // read data from the stream
                     let ctx = get_ctx();
+                    if !ctx.is_primary() {
+                        return Err("Can not read data on replica".to_string())
+                    }
                     let stream_name = ctx.create_string(key);
                     let key = ctx.open_key(&stream_name);
                     let mut stream_iterator =
@@ -445,6 +448,10 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                 Box::new(|key_name, id| {
                     // trim the stream callback
                     let ctx = get_ctx();
+                    if !ctx.is_primary() {
+                        ctx.log_warning("Attempt to trim data on replica was denied.");
+                        return;
+                    }
                     let stream_name = ctx.create_string(key_name);
                     let key = ctx.open_key_writable(&stream_name);
                     let res = key.trim_stream_by_id(id, false);

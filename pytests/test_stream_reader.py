@@ -411,3 +411,47 @@ redis.register_stream_consumer("consumer", "stream", 1, false, function(client, 
     
     runUntil(env, 1, lambda: toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['total_record_processed'])
     env.assertEqual('None', toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 6)[0]['stream_consumers'][0]['streams'][0]['last_error'])
+
+@gearsTest()
+def testBecomeReplicaWhileProcessingData(env):
+    """#!js name=lib
+var promise = null;
+var done = null;
+
+redis.register_function("continue_process", async function(){
+    if (promise == null) {
+        return "no data to processes";
+    }
+
+    var p = new Promise((resume, reject) => {
+        done = resume;
+    });
+    promise("continue");
+    promise = null;
+    return await p;
+},
+['no-writes'])
+
+redis.register_stream_consumer("consumer", "stream", 1, true, async function(client) {
+    await new Promise((resume, reject) => {
+        promise = resume;
+    });
+    done("OK");
+}) 
+    """
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    env.cmd('xadd', 'stream:1', '*', 'foo', 'bar')
+    runUntil(env, 'OK', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'continue_process'))
+    runUntil(env, 1, lambda: toDictionary(toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 4)[0]['stream_consumers'][0]['streams'][0], 1)['total_record_processed'])
+
+    # Turn into a slave
+    env.cmd('slaveof', '127.0.0.1', '3300')
+    runUntil(env, 'OK', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'continue_process'))
+    runUntil(env, 2, lambda: toDictionary(toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 4)[0]['stream_consumers'][0]['streams'][0], 1)['total_record_processed'])
+    
+    runFor('no data to processes', lambda: env.cmd('RG.FUNCTION', 'CALL', 'lib', 'continue_process'))
+    res = toDictionary(toDictionary(env.execute_command('RG.FUNCTION', 'LIST', 'vvv'), 4)[0]['stream_consumers'][0]['streams'][0], 1)['total_record_processed']
+    env.assertEqual(2, res)
+
+    env.cmd('slaveof', 'no', 'one')
