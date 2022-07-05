@@ -181,3 +181,5 @@ And run it:
 > redis-cli RG.FUNCTION CALL foo foo
 "3.1415926535897931"
 ```
+
+Notice that RedisGears **only supports pure JS libraries**, a library that has a native code or use some native JS API provided by the browser or by nodejs **will not work**.
