@@ -74,3 +74,7 @@ And now we can invoke `my_ping` using `RG.FUNCTION CALL`:
 > redis-cli RG.FUNCTION CALL lib my_ping
 "PONG"
 ```
+
+### What next?
+
+* [Create a development environment](docs/create_development_environment.md)
