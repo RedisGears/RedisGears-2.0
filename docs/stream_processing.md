@@ -31,7 +31,7 @@ Argument Discription:
 * stream - streams name prefix on which to trigger the callback.
 * window - how many elements can be proceesed simultaneously.
 * trim stream - whether or not to trim the stream.
-* callback - the callback to invoke on each element in the stream. Following the same rules of [Sync and Async invocation]().
+* callback - the callback to invoke on each element in the stream. Following the same rules of [Sync and Async invocation](). The callback will be invoke only on primary shard.
 
 If we register this library (see the [getting started](../README.md) section to learn how to Register a RedisGears function) and run the following command on our Redis:
 
@@ -136,3 +136,20 @@ We can observe the streams which are tracked by our registered consumer using [R
    16) (nil)
 
 ```
+
+## Enable Trimming
+
+It is enough that a single consumer will enable trimming so that the stream will be trimmed. The stream will be trim according to the slowest consumer that consume the stream at a given time (even if this is not the consumer that enabled the trimming). Raising exception durring the callback invocation will **not prevent the trimming**. The callback should decide how to handle failures by invoke a retry or write some error log. The error will be added to the `last_error` field on [RG.FUNCTION LIST]() command.
+
+## Data processing Guarantees
+
+As long as the primary shard is up and running we guarantee exactly once property (the callback will be triggered exactly one time on each element in the stream). In case of failure such as shard crashing, we guarantee at least once propert (the callback will be triggered at least one time on each element in the stream)
+
+## Upgrades
+
+When upgrading the consumer code (using the `UPGRADE` option of [`RG.FUNCTION LOAD`]() command) the following consumer parameters can be updated:
+
+* Window
+* Trimming
+
+Any attempt to update any other parameter will result in an error when loading the library.
