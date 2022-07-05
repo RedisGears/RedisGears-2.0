@@ -134,13 +134,50 @@ We will see that the generated file content has changed and it is now contains t
 
 Now we can upload our function (notice that we use the UPGRADE option to upgrade the existing function):
 
-```
+```bash
 redis-cli -x RG.FUNCTION LOAD UPGRADE < ./dist/main.js
 ```
 
 And we can test our function:
 
-```
+```bash
 > redis-cli RG.FUNCTION CALL foo foo
 "test"
+```
+
+## Using an External Library
+
+Now lets use some exteral library, for example `mathjs`. To install the library run the following npm command on the project root directory:
+
+```
+npm install mathjs
+```
+
+Lets change our program to use `pi` variable imported from `mathjs` library:
+
+```js
+import {pi} from "mathjs"
+
+redis.register_function("foo", function(){
+    return pi;
+});
+```
+
+Again lets compile our project:
+
+```bash
+npx webpack --config webpack.config.js
+```
+
+Upgrade our library:
+
+```bash
+redis-cli -x RG.FUNCTION LOAD UPGRADE < ./dist/main.js
+```
+
+And run it:
+
+```bash
+> redis-cli RG.FUNCTION CALL foo foo
+"3.1415926535897931"
 ```
