@@ -103,4 +103,4 @@ The failure will result in an exception that the function writer can choose to h
 Blocking the Redis for long time is discouraged and considered unsafe operation. RedisGears attempt to protect the function writer and timeout the blocking if it continues for to long. The timeout can be set as a [module configuration]() along side the fatal failure policy that indicate how to handle the timeout. Policies can be one of the following:
 
 * Abort - stop the function invocation even if we lose the atomicity property
-* Kill - keet the atomicity property and do not stop the function invocation. In such case there is a risk of an external processes to kill the Redis server, thinking that the shard is not responding.
+* Kill - keep the atomicity property and do not stop the function invocation. In such case there is a risk of an external processes to kill the Redis server, thinking that the shard is not responding.
