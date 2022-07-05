@@ -78,3 +78,4 @@ And now we can invoke `my_ping` using `RG.FUNCTION CALL`:
 ### What next?
 
 * [Create a development environment](docs/create_development_environment.md)
+* [Stream Processing with RedisGears 2.0](docs/stream_processing.md)
