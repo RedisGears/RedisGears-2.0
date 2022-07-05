@@ -31,7 +31,7 @@ Argument Discription:
 * stream - streams name prefix on which to trigger the callback.
 * window - how many elements can be proceesed simultaneously.
 * trim stream - whether or not to trim the stream.
-* callback - the callback to invoke on each element in the stream. Following the same rules of [Sync and Async invocation](). The callback will be invoke only on primary shard.
+* callback - the callback to invoke on each element in the stream. Following the same rules of [Sync and Async invocation](sync_and_async_run.md). The callback will be invoke only on primary shard.
 
 If we register this library (see the [getting started](../README.md) section to learn how to Register a RedisGears function) and run the following command on our Redis:
 

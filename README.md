@@ -75,7 +75,8 @@ And now we can invoke `my_ping` using `RG.FUNCTION CALL`:
 "PONG"
 ```
 
-### What next?
+### Whats next?
 
 * [Create a development environment](docs/create_development_environment.md)
+* [Sync and Async Run](docs/sync_and_async_run.md)
 * [Stream Processing with RedisGears 2.0](docs/stream_processing.md)
