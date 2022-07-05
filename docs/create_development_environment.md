@@ -1,6 +1,6 @@
 # Create a Development Environemt
 
-When the project is small it is accaptable to have a single file that contains the entire code base. But as the project grows and become complex it is less comftable to mantain it as a single file project. Lucky for us JS already face such problem and has the relevant tool the maintains a multi file project and compress it on build time to a single file that contains all the code. In this taturial we will explain how to create a multi file project and how to wrap it as a single file and send it to RedisGears. The taturial assume you have Redis with RedisGears 2.0 installed on `localhost:6379`. See [getting started](../README.md) section for installation instructions.
+When the project is small it is accaptable to have a single file that contains the entire code base. But as the project grows and become complex it is less comftable to mantain it as a single file project. Lucky for us JS already face such problem and has the relevant tool to maintain a multi file project and compress it on build time to a single file that contains all the code. In this taturial we will explain how to create a multi file project and how to wrap it as a single file and send it to RedisGears. The taturial assume you have Redis with RedisGears 2.0 installed on `localhost:6379`. See [getting started](../README.md) section for installation instructions.
 
 ## Pre-requisite
 
@@ -8,7 +8,7 @@ When the project is small it is accaptable to have a single file that contains t
 
 ## Creating the Project
 
-Lets first create a directory to store our project and initialize out project with npm:
+Lets first create a directory to store our project and initialize our project with npm:
 ```bash
 mkdir test
 cd test
