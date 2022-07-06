@@ -237,6 +237,7 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
                     )));
                     return;
                 }
+                let _notification_blocker = get_notification_blocker();
                 let val = keys_notifications_consumer_ctx.on_notification_fired(
                     event,
                     key,
@@ -293,9 +294,23 @@ struct GlobalCtx {
     stream_ctx: StreamReaderCtx<GearsStreamRecord, GearsStreamConsumer>,
     notifications_ctx: KeysNotificationsCtx,
     config: Config,
+    avoid_key_space_notifications: bool
 }
 
 static mut GLOBALS: Option<GlobalCtx> = None;
+
+pub(crate) struct NotificationBlocker;
+
+pub(crate) fn get_notification_blocker() -> NotificationBlocker {
+    get_globals_mut().avoid_key_space_notifications = true;
+    NotificationBlocker
+}
+
+impl<'a> Drop for NotificationBlocker {
+    fn drop(&mut self) {
+        get_globals_mut().avoid_key_space_notifications = false;
+    }
+}
 
 fn get_globals() -> &'static GlobalCtx {
     unsafe { GLOBALS.as_ref().unwrap() }
@@ -471,6 +486,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
             ),
             notifications_ctx: KeysNotificationsCtx::new(),
             config: Config::new(),
+            avoid_key_space_notifications: false,
         };
 
         let v8_path = match args.into_iter().next() {
@@ -594,11 +610,14 @@ fn function_call_command(
     let args = args.collect::<Vec<redis_module::RedisString>>();
     let args_iter = args.iter();
 
-    function.func.call(&mut RunCtx {
-        ctx: ctx,
-        iter: args_iter,
-        flags: function.flags,
-    });
+    {
+        let _notification_blocker = get_notification_blocker();
+        function.func.call(&mut RunCtx {
+            ctx: ctx,
+            iter: args_iter,
+            flags: function.flags,
+        });
+    }
 
     Ok(RedisValue::NoReply)
 }
@@ -1241,7 +1260,11 @@ fn generic_notification(_ctx: &Context, _event_type: NotifyEvent, event: &str, k
 }
 
 fn key_space_notification(_ctx: &Context, _event_type: NotifyEvent, event: &str, key: &str) {
-    get_globals().notifications_ctx.on_key_touched(event, key)
+    let globals = get_globals();
+    if globals.avoid_key_space_notifications {
+        return;
+    }
+    globals.notifications_ctx.on_key_touched(event, key)
 }
 
 fn update_stream_last_read_id(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

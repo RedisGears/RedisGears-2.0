@@ -6,12 +6,13 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 };
 
 use crate::run_ctx::RedisClientCallOptions;
-use crate::{background_run_ctx::BackgroundRunCtx, call_redis_command};
+use crate::{background_run_ctx::BackgroundRunCtx, call_redis_command, NotificationBlocker, get_notification_blocker};
 
 pub(crate) struct BackgroundRunScopeGuardCtx {
     pub(crate) _ctx_guard: ContextGuard,
     call_options: RedisClientCallOptions,
     user: Option<String>,
+    _notification_blocker: NotificationBlocker,
 }
 
 unsafe impl Sync for BackgroundRunScopeGuardCtx {}
@@ -27,6 +28,7 @@ impl BackgroundRunScopeGuardCtx {
             _ctx_guard: ctx_guard,
             call_options: call_options,
             user: user,
+            _notification_blocker: get_notification_blocker(),
         }
     }
 }

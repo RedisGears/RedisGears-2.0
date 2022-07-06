@@ -17,6 +17,8 @@ use crate::{
 
 use crate::stream_reader::{StreamConsumer, StreamReaderAck};
 
+use crate::get_notification_blocker;
+
 use crate::RefCellWrapper;
 use std::sync::Arc;
 
@@ -117,20 +119,23 @@ impl StreamConsumer<GearsStreamRecord> for GearsStreamConsumer {
             )));
         }
 
-        let res = self.ctx.process_record(
-            stream_name,
-            Box::new(record),
-            &mut StreamRunCtx::new(self.user.ref_cell.borrow().clone(), self.flags),
-            Box::new(|ack| {
-                // here we must take the redis lock
-                let ctx = ThreadSafeContext::new();
-                let _gaurd = ctx.lock();
-                ack_callback(match ack {
-                    StreamRecordAck::Ack => StreamReaderAck::Ack,
-                    StreamRecordAck::Nack(msg) => StreamReaderAck::Nack(msg),
-                })
-            }),
-        );
+        let res = {
+            let _notification_blocker = get_notification_blocker();
+            self.ctx.process_record(
+                stream_name,
+                Box::new(record),
+                &mut StreamRunCtx::new(self.user.ref_cell.borrow().clone(), self.flags),
+                Box::new(|ack| {
+                    // here we must take the redis lock
+                    let ctx = ThreadSafeContext::new();
+                    let _gaurd = ctx.lock();
+                    ack_callback(match ack {
+                        StreamRecordAck::Ack => StreamReaderAck::Ack,
+                        StreamRecordAck::Nack(msg) => StreamReaderAck::Nack(msg),
+                    })
+                }),
+            )
+        };
         res.map_or(None, |r| {
             Some(match r {
                 StreamRecordAck::Ack => StreamReaderAck::Ack,

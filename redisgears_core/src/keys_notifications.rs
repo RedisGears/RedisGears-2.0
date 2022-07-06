@@ -75,6 +75,7 @@ fn fire_event(consumer: &Arc<RefCell<NotificationConsumer>>, event: &str, key: &
     }
     let stats_ref = Arc::clone(&c.stats);
     let start_time = SystemTime::now();
+
     (c.callback.as_ref().unwrap())(
         event,
         key,
