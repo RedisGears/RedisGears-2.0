@@ -8,6 +8,8 @@ use redis_module::RedisError;
 
 use redisgears_plugin_api::redisgears_plugin_api::backend_ctx::LibraryFatalFailurePolicy;
 
+use std::fmt;
+
 pub(crate) struct ExecutionThreads {
     pub(crate) size: usize,
     flags: ConfigFlags,
@@ -19,6 +21,12 @@ impl ExecutionThreads {
             size: 1,
             flags: ConfigFlags::new().emmutable(),
         }
+    }
+}
+
+impl fmt::Display for ExecutionThreads {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.size)
     }
 }
 
@@ -72,6 +80,12 @@ impl LibraryMaxMemory {
     }
 }
 
+impl fmt::Display for LibraryMaxMemory {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.size)
+    }
+}
+
 impl RedisConfigCtx for LibraryMaxMemory {
     fn name(&self) -> &'static str {
         "library-maxmemory"
@@ -122,6 +136,12 @@ impl GearBoxAddress {
     }
 }
 
+impl fmt::Display for GearBoxAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.address)
+    }
+}
+
 impl RedisConfigCtx for GearBoxAddress {
     fn name(&self) -> &'static str {
         "gearsbox-address"
@@ -161,6 +181,15 @@ impl LibraryOnFatalFailurePolicy {
         LibraryOnFatalFailurePolicy {
             policy: LibraryFatalFailurePolicy::Abort,
             flags: ConfigFlags::new(),
+        }
+    }
+}
+
+impl fmt::Display for LibraryOnFatalFailurePolicy {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.policy {
+            LibraryFatalFailurePolicy::Abort => write!(f, "abort"),
+            LibraryFatalFailurePolicy::Kill => write!(f, "kill"),
         }
     }
 }
@@ -223,6 +252,12 @@ impl LockRedisTimeout {
     }
 }
 
+impl fmt::Display for LockRedisTimeout {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.size)
+    }
+}
+
 impl RedisConfigCtx for LockRedisTimeout {
     fn name(&self) -> &'static str {
         "lock-redis-timeout"
@@ -275,6 +310,132 @@ impl Config {
             gears_box_address: GearBoxAddress::new(),
             libraray_fatal_failure_policy: LibraryOnFatalFailurePolicy::new(),
             lock_regis_timeout: LockRedisTimeout::new(),
+        }
+    }
+
+    pub fn set_numeric_value<T: RedisNumberConfigCtx>(
+        config: &mut T,
+        val: &str,
+    ) -> Result<(), RedisError> {
+        let v = match val.parse::<usize>() {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(RedisError::String(format!(
+                    "Failed parsing value '{}' as usize, {}.",
+                    val, e
+                )))
+            }
+        };
+
+        if v < config.min() as usize {
+            return Err(RedisError::String(format!(
+                "Value '{}' is less then minimum value allowed '{}'",
+                v,
+                config.min()
+            )));
+        }
+
+        if v > config.max() as usize {
+            return Err(RedisError::String(format!(
+                "Value '{}' is greater then maximum value allowed '{}'",
+                v,
+                config.max()
+            )));
+        }
+
+        config.set(config.name(), v as i64)
+    }
+
+    pub fn set_string_value<T: RedisStringConfigCtx>(
+        config: &mut T,
+        val: &str,
+    ) -> Result<(), RedisError> {
+        config.set(
+            config.name(),
+            RedisString::create(std::ptr::null_mut(), val),
+        )
+    }
+
+    pub fn set_enum_value<T: RedisEnumConfigCtx>(
+        config: &mut T,
+        val: &str,
+    ) -> Result<(), RedisError> {
+        let values = config.values();
+        for (n, v) in config.values() {
+            if n == val {
+                return config.set(config.name(), v)
+            }
+        }
+
+        return Err(RedisError::String(format!(
+            "Unknow configration value '{}', options are {:?}.",
+            val, values.iter().map(|(k,_v)| *k).collect::<Vec<&str>>()
+        )));
+    }
+
+    pub(crate) fn initial_set(&mut self, name: &str, val: &str) -> Result<(), RedisError> {
+        match name {
+            x if x == self.execution_threads.name() => {
+                Self::set_numeric_value(&mut self.execution_threads, val)
+            }
+            x if x == self.library_maxmemory.name() => {
+                Self::set_numeric_value(&mut self.library_maxmemory, val)
+            }
+            x if x == self.gears_box_address.name() => {
+                Self::set_string_value(&mut self.gears_box_address, val)
+            }
+            x if x == self.libraray_fatal_failure_policy.name() => {
+                Self::set_enum_value(&mut self.libraray_fatal_failure_policy, val)
+            }
+            x if x == self.lock_regis_timeout.name() => {
+                Self::set_numeric_value(&mut self.lock_regis_timeout, val)
+            }
+            _ => return Err(RedisError::String(format!("No such configuration {}", name))),
+        }
+    }
+
+    pub fn is_emmutable<T: RedisConfigCtx>(config: &T) -> bool {
+        config.flags().is_emmutable()
+    }
+
+    pub(crate) fn set(&mut self, name: &str, val: &str) -> Result<(), RedisError> {
+        if match name {
+            x if x == self.execution_threads.name() => {
+                Self::is_emmutable(&mut self.execution_threads)
+            }
+            x if x == self.library_maxmemory.name() => {
+                Self::is_emmutable(&mut self.library_maxmemory)
+            }
+            x if x == self.gears_box_address.name() => {
+                Self::is_emmutable(&mut self.gears_box_address)
+            }
+            x if x == self.libraray_fatal_failure_policy.name() => {
+                Self::is_emmutable(&mut self.libraray_fatal_failure_policy)
+            }
+            x if x == self.lock_regis_timeout.name() => {
+                Self::is_emmutable(&mut self.lock_regis_timeout)
+            }
+            _ => return Err(RedisError::String(format!("No such configuration {}", name))),
+        } {
+            return Err(RedisError::String(format!(
+                "Configuration {} can not be changed at runtime",
+                name
+            )));
+        }
+
+        self.initial_set(name, val)
+    }
+
+    pub(crate) fn get(&self, name: &str) -> Result<String, RedisError> {
+        match name {
+            x if x == self.execution_threads.name() => Ok(format!("{}", self.execution_threads)),
+            x if x == self.library_maxmemory.name() => Ok(format!("{}", self.library_maxmemory)),
+            x if x == self.gears_box_address.name() => Ok(format!("{}", self.gears_box_address)),
+            x if x == self.libraray_fatal_failure_policy.name() => {
+                Ok(format!("{}", self.libraray_fatal_failure_policy))
+            }
+            x if x == self.lock_regis_timeout.name() => Ok(format!("{}", self.lock_regis_timeout)),
+            _ => Err(RedisError::String(format!("No such configuration {}", name))),
         }
     }
 }

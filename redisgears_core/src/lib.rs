@@ -394,7 +394,35 @@ pub(crate) fn call_redis_command(
     }
 }
 
-fn js_post_init(_ctx: &Context) -> Status {
+fn js_post_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
+    let mut args = args.into_iter().skip(1); // skip the plugin
+    while let Some(config_key) = args.next() {
+        let key = match config_key.try_as_str() {
+            Ok(s) => s,
+            Err(e) => {
+                ctx.log_warning(&format!("Can not convert config key to str, {}.", e));
+                return Status::Err;
+            }
+        };
+        let config_val = match args.next() {
+            Some(s) => s,
+            None => {
+                ctx.log_warning(&format!("Config name '{}' has not value", key));
+                return Status::Err;
+            }
+        };
+        let val = match config_val.try_as_str() {
+            Ok(s) => s,
+            Err(e) => {
+                ctx.log_warning(&format!("Can not convert config value for key '{}' to str, {}.", key, e));
+                return Status::Err;
+            }
+        };
+        if let Err(e) = get_globals_mut().config.initial_set(key, val) {
+            ctx.log_warning(&format!("Failed setting configuration '{}' with value '{}', {}.", key, val, e));
+            return Status::Err;
+        }
+    }
     let globals = get_globals_mut();
     globals.pool = Some(Mutex::new(ThreadPool::new(
         globals.config.execution_threads.size,
@@ -1246,6 +1274,27 @@ fn function_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 }
 
+fn config_command(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let sub_command = args.next_arg()?.try_as_str()?.to_lowercase();
+    match sub_command.as_ref() {
+        "get" => {
+            let config_name = args.next_arg()?.try_as_str()?;
+            Ok(RedisValue::BulkString(get_globals().config.get(config_name)?))
+        },
+        "set" => {
+            let config_name = args.next_arg()?.try_as_str()?;
+            let config_val = args.next_arg()?.try_as_str()?;
+            get_globals_mut().config.set(config_name, config_val)?;
+            Ok(RedisValue::SimpleStringStatic("OK"))
+        }
+        _ => Err(RedisError::String(format!(
+            "Unknown subcommand {}",
+            sub_command
+        ))),
+    }
+}
+
 fn gears_box_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
     let sub_command = args.next_arg()?.try_as_str()?.to_lowercase();
@@ -1407,6 +1456,7 @@ redis_module! {
     commands: [
         ["rg.function", function_command, "readonly deny-script", 0,0,0],
         ["rg.box", gears_box_command, "readonly deny-script", 0,0,0],
+        ["rg.config", config_command, "readonly deny-script", 0,0,0],
         ["_rg_internals.update_stream_last_read_id", update_stream_last_read_id, "readonly", 0,0,0],
     ],
     event_handlers: [

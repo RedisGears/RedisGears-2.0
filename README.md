@@ -5,7 +5,7 @@ A [Redis module](https://redis.io/docs/modules/) that allows running a JS functi
 ## Getting started
 ### Pre-requisite
 1. [rust](https://www.rust-lang.org/tools/install)
-2. [Redis v7.0 or above](https://redis.io/docs/stack/search/)
+2. [Redis v7.0.3 or above](https://redis.io/)
 
 ### Compile
 Run the following on the main directoty:
