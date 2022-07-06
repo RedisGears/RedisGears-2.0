@@ -7,8 +7,7 @@ edition = "2021"
 
 [dependencies]
 #redis-module = { version="1.0", features = ["experimental-api"]}
-#redis-module = { git = "https://github.com/RedisLabsModules/redismodule-rs", branch = "api_extentions", features = ["experimental-api"]}
-redis-module = { path = "../../redismodule-rs", features = ["experimental-api"]}
+redis-module = { git = "https://github.com/RedisLabsModules/redismodule-rs", branch = "api_extentions", features = ["experimental-api"]}
 libloading = "0.7"
 redisgears_plugin_api = {path="../redisgears_plugin_api/"}
 threadpool = "1.8.1"
