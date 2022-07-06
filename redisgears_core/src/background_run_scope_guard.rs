@@ -6,7 +6,10 @@ use redisgears_plugin_api::redisgears_plugin_api::{
 };
 
 use crate::run_ctx::RedisClientCallOptions;
-use crate::{background_run_ctx::BackgroundRunCtx, call_redis_command, NotificationBlocker, get_notification_blocker};
+use crate::{
+    background_run_ctx::BackgroundRunCtx, call_redis_command, get_notification_blocker,
+    NotificationBlocker,
+};
 
 pub(crate) struct BackgroundRunScopeGuardCtx {
     pub(crate) _ctx_guard: ContextGuard,

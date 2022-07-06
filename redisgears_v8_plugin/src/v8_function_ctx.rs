@@ -14,7 +14,7 @@ use crate::v8_native_functions::{get_backgrounnd_client, RedisClient};
 use crate::v8_script_ctx::V8ScriptCtx;
 
 use std::cell::RefCell;
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use std::str;
 
@@ -209,7 +209,7 @@ impl V8InternalFunction {
                 );
             self.script_ctx.before_release_gil();
             self.script_ctx.after_run();
-            
+
             ctx_scope.set_private_data::<bool>(0, None); // indicate we are not blocked
             res
         };

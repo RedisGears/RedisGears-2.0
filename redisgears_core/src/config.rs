@@ -1,5 +1,5 @@
 use redis_module::context::configuration::{
-    ConfigFlags, RedisConfigCtx, RedisNumberConfigCtx, RedisStringConfigCtx, RedisEnumConfigCtx,
+    ConfigFlags, RedisConfigCtx, RedisEnumConfigCtx, RedisNumberConfigCtx, RedisStringConfigCtx,
 };
 use redis_module::RedisString;
 
@@ -152,7 +152,7 @@ impl RedisStringConfigCtx for GearBoxAddress {
 }
 
 pub(crate) struct LibraryOnFatalFailurePolicy {
-    pub(crate) policy:  LibraryFatalFailurePolicy,
+    pub(crate) policy: LibraryFatalFailurePolicy,
     flags: ConfigFlags,
 }
 
@@ -197,8 +197,12 @@ impl RedisEnumConfigCtx for LibraryOnFatalFailurePolicy {
 
     fn set(&mut self, _name: &str, value: i32) -> Result<(), RedisError> {
         match value {
-            x if x == LibraryFatalFailurePolicy::Abort as i32 => self.policy = LibraryFatalFailurePolicy::Abort,
-            x if x == LibraryFatalFailurePolicy::Kill as i32 => self.policy = LibraryFatalFailurePolicy::Kill,
+            x if x == LibraryFatalFailurePolicy::Abort as i32 => {
+                self.policy = LibraryFatalFailurePolicy::Abort
+            }
+            x if x == LibraryFatalFailurePolicy::Kill as i32 => {
+                self.policy = LibraryFatalFailurePolicy::Kill
+            }
             _ => return Err(RedisError::Str("unsupported value were given")),
         }
         Ok(())

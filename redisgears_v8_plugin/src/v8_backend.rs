@@ -1,7 +1,7 @@
 use redisgears_plugin_api::redisgears_plugin_api::{
-    backend_ctx::BackendCtxInterface, backend_ctx::CompiledLibraryInterface,
-    load_library_ctx::LibraryCtxInterface, CallResult, GearsApiError, backend_ctx::BackendCtx,
-    backend_ctx::LibraryFatalFailurePolicy,
+    backend_ctx::BackendCtx, backend_ctx::BackendCtxInterface,
+    backend_ctx::CompiledLibraryInterface, backend_ctx::LibraryFatalFailurePolicy,
+    load_library_ctx::LibraryCtxInterface, CallResult, GearsApiError,
 };
 
 use crate::v8_script_ctx::V8ScriptCtx;
@@ -16,8 +16,8 @@ use crate::v8_script_ctx::V8LibraryCtx;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::str;
 
-use std::sync::{Arc, Weak, Mutex};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex, Weak};
 
 struct Globals {
     backend_ctx: Option<BackendCtx>,
@@ -40,15 +40,13 @@ unsafe impl GlobalAlloc for Globals {
 }
 
 #[global_allocator]
-static mut GLOBAL: Globals = Globals {
-    backend_ctx: None,
-};
+static mut GLOBAL: Globals = Globals { backend_ctx: None };
 
 pub(crate) fn log(msg: &str) {
     unsafe { (GLOBAL.backend_ctx.as_ref().unwrap().log)(msg) };
 }
 
-pub(crate) fn get_fatal_failure_policy() -> LibraryFatalFailurePolicy{
+pub(crate) fn get_fatal_failure_policy() -> LibraryFatalFailurePolicy {
     unsafe { (GLOBAL.backend_ctx.as_ref().unwrap().get_on_oom_policy)() }
 }
 
@@ -80,10 +78,7 @@ impl BackendCtxInterface for V8Backend {
         "js"
     }
 
-    fn initialize(
-        &self,
-        backend_ctx: BackendCtx,
-    ) -> Result<(), GearsApiError> {
+    fn initialize(&self, backend_ctx: BackendCtx) -> Result<(), GearsApiError> {
         unsafe {
             GLOBAL.backend_ctx = Some(backend_ctx);
         }
@@ -101,7 +96,7 @@ impl BackendCtxInterface for V8Backend {
         );
 
         let script_ctxs = Arc::clone(&self.script_ctx_vec);
-        std::thread::spawn(move||{
+        std::thread::spawn(move || {
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let l = script_ctxs.lock().unwrap();
@@ -110,7 +105,11 @@ impl BackendCtxInterface for V8Backend {
                         Some(s) => s,
                         None => continue,
                     };
-                    if script_ctx.is_running.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                    if script_ctx
+                        .is_running
+                        .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+                        .is_ok()
+                    {
                         let interrupt_script_ctx_clone = Weak::clone(&script_ctx_weak);
                         script_ctx.isolate.request_interrupt(move|isolate|{
                             let script_ctx = match interrupt_script_ctx_clone.upgrade() {

@@ -8,12 +8,12 @@ use v8_rs::v8::{
     v8_script::V8PersistedScript,
 };
 
-use std::sync::Arc;
 use redisgears_plugin_api::redisgears_plugin_api::RefCellWrapper;
 use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
-use std::time::SystemTime;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::SystemTime;
 
 use crate::get_exception_msg;
 
@@ -25,7 +25,7 @@ pub(crate) enum GilState {
 pub(crate) struct GilStateCtx {
     state: GilState,
     lock_time: SystemTime,
-    lock_timed_out: bool
+    lock_timed_out: bool,
 }
 
 impl GilStateCtx {
@@ -93,7 +93,9 @@ impl V8ScriptCtx {
             script: script,
             compiled_library_api: compiled_library_api,
             is_running: AtomicBool::new(false),
-            lock_state: RefCellWrapper{ref_cell: RefCell::new(GilStateCtx::new())},
+            lock_state: RefCellWrapper {
+                ref_cell: RefCell::new(GilStateCtx::new()),
+            },
         }
     }
 

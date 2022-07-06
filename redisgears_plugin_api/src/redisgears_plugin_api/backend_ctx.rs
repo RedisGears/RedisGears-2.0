@@ -24,10 +24,7 @@ pub struct BackendCtx {
 
 pub trait BackendCtxInterface {
     fn get_name(&self) -> &'static str;
-    fn initialize(
-        &self,
-        backend_ctx: BackendCtx,
-    ) -> Result<(), GearsApiError>;
+    fn initialize(&self, backend_ctx: BackendCtx) -> Result<(), GearsApiError>;
     fn compile_library(
         &mut self,
         code: &str,

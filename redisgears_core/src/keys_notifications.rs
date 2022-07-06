@@ -1,7 +1,7 @@
 use redisgears_plugin_api::redisgears_plugin_api::RefCellWrapper;
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
-use std::time::{SystemTime};
+use std::time::SystemTime;
 
 pub(crate) type NotificationCallback =
     Box<dyn Fn(&str, &str, Box<dyn FnOnce(Result<(), String>) + Send + Sync>)>;
@@ -47,10 +47,7 @@ impl NotificationConsumer {
         }
     }
 
-    pub(crate) fn set_callback(
-        &mut self,
-        callback: NotificationCallback,
-    ) -> NotificationCallback {
+    pub(crate) fn set_callback(&mut self, callback: NotificationCallback) -> NotificationCallback {
         let old_callback = self.callback.take();
         self.callback = Some(callback);
         old_callback.unwrap()

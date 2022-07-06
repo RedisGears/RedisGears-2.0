@@ -13,12 +13,12 @@ use redis_module::{
 };
 
 use redisgears_plugin_api::redisgears_plugin_api::{
-    backend_ctx::BackendCtxInterface, function_ctx::FunctionCtxInterface,
+    backend_ctx::BackendCtx, backend_ctx::BackendCtxInterface, function_ctx::FunctionCtxInterface,
     keys_notifications_consumer_ctx::KeysNotificationsConsumerCtxInterface,
     load_library_ctx::LibraryCtxInterface, load_library_ctx::LoadLibraryCtxInterface,
     load_library_ctx::RegisteredKeys, load_library_ctx::FUNCTION_FLAG_ALLOW_OOM,
     load_library_ctx::FUNCTION_FLAG_NO_WRITES, stream_ctx::StreamCtxInterface, CallResult,
-    GearsApiError, backend_ctx::BackendCtx,
+    GearsApiError,
 };
 
 use redisgears_plugin_api::redisgears_plugin_api::RefCellWrapper;
@@ -262,7 +262,11 @@ impl LoadLibraryCtxInterface for GearsLibraryCtx {
                 RegisteredKeys::Prefix(s) => ConsumerKey::Prefix(s.to_string()),
             };
             let old_key = o_c.set_key(new_key);
-            self.revert_notifications_consumers.push((name.to_string(), old_key, old_consumer_callback));
+            self.revert_notifications_consumers.push((
+                name.to_string(),
+                old_key,
+                old_consumer_callback,
+            ));
             Arc::clone(old_notification_consumer)
         } else {
             let globlas = get_globals_mut();
@@ -294,7 +298,7 @@ struct GlobalCtx {
     stream_ctx: StreamReaderCtx<GearsStreamRecord, GearsStreamConsumer>,
     notifications_ctx: KeysNotificationsCtx,
     config: Config,
-    avoid_key_space_notifications: bool
+    avoid_key_space_notifications: bool,
 }
 
 static mut GLOBALS: Option<GlobalCtx> = None;
@@ -443,7 +447,7 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                     // read data from the stream
                     let ctx = get_ctx();
                     if !ctx.is_primary() {
-                        return Err("Can not read data on replica".to_string())
+                        return Err("Can not read data on replica".to_string());
                     }
                     let stream_name = ctx.create_string(key);
                     let key = ctx.open_key(&stream_name);
@@ -521,14 +525,18 @@ fn js_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
                 ctx.log_warning(&format!("Backend {} already exists", name));
                 return Status::Err;
             }
-            if let Err(e) = backend.initialize(
-                BackendCtx {
-                    allocator: &redis_module::ALLOC,
-                    log: Box::new(|msg| get_ctx().log_notice(msg)),
-                    get_on_oom_policy: Box::new(|| get_globals().config.libraray_fatal_failure_policy.policy.clone()),
-                    get_lock_timeout: Box::new(|| get_globals().config.lock_regis_timeout.size),
-                }
-            ) {
+            if let Err(e) = backend.initialize(BackendCtx {
+                allocator: &redis_module::ALLOC,
+                log: Box::new(|msg| get_ctx().log_notice(msg)),
+                get_on_oom_policy: Box::new(|| {
+                    get_globals()
+                        .config
+                        .libraray_fatal_failure_policy
+                        .policy
+                        .clone()
+                }),
+                get_lock_timeout: Box::new(|| get_globals().config.lock_regis_timeout.size),
+            }) {
                 ctx.log_warning(&format!("Failed loading {} backend, {}", name, e.get_msg()));
                 return Status::Err;
             }
@@ -993,7 +1001,10 @@ fn function_list_command(
                                         RedisValue::BulkString("total_exection_time".to_string()),
                                         RedisValue::Integer(stats.total_execution_time as i64),
                                         RedisValue::BulkString("avg_exection_time".to_string()),
-                                        RedisValue::Float(stats.total_execution_time as f64 / stats.num_finished as f64),
+                                        RedisValue::Float(
+                                            stats.total_execution_time as f64
+                                                / stats.num_finished as f64,
+                                        ),
                                     ])
                                 }
                             })
@@ -1019,7 +1030,10 @@ fn function_list_command(
     ))
 }
 
-pub(crate) fn function_load_revert(mut gears_library: GearsLibraryCtx, libraries: &mut HashMap<String, GearsLibrary>) {
+pub(crate) fn function_load_revert(
+    mut gears_library: GearsLibraryCtx,
+    libraries: &mut HashMap<String, GearsLibrary>,
+) {
     if let Some(old_lib) = gears_library.old_lib.take() {
         for (name, old_ctx, old_window, old_trim) in gears_library.revert_stream_consumers {
             let stream_data = gears_library.stream_consumers.get(&name).unwrap();

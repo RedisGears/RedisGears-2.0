@@ -184,7 +184,7 @@ impl V8NotificationsCtxInternal {
                     &ctx_scope,
                     Some(&[&r_client.to_value(), &notification_data.to_value()]),
                 );
-                self.script_ctx.after_run();
+            self.script_ctx.after_run();
 
             match res {
                 Some(res) => {
