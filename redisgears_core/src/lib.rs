@@ -414,12 +414,18 @@ fn js_post_init(ctx: &Context, args: &Vec<RedisString>) -> Status {
         let val = match config_val.try_as_str() {
             Ok(s) => s,
             Err(e) => {
-                ctx.log_warning(&format!("Can not convert config value for key '{}' to str, {}.", key, e));
+                ctx.log_warning(&format!(
+                    "Can not convert config value for key '{}' to str, {}.",
+                    key, e
+                ));
                 return Status::Err;
             }
         };
         if let Err(e) = get_globals_mut().config.initial_set(key, val) {
-            ctx.log_warning(&format!("Failed setting configuration '{}' with value '{}', {}.", key, val, e));
+            ctx.log_warning(&format!(
+                "Failed setting configuration '{}' with value '{}', {}.",
+                key, val, e
+            ));
             return Status::Err;
         }
     }
@@ -1280,8 +1286,10 @@ fn config_command(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     match sub_command.as_ref() {
         "get" => {
             let config_name = args.next_arg()?.try_as_str()?;
-            Ok(RedisValue::BulkString(get_globals().config.get(config_name)?))
-        },
+            Ok(RedisValue::BulkString(
+                get_globals().config.get(config_name)?,
+            ))
+        }
         "set" => {
             let config_name = args.next_arg()?.try_as_str()?;
             let config_val = args.next_arg()?.try_as_str()?;

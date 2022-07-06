@@ -363,13 +363,14 @@ impl Config {
         let values = config.values();
         for (n, v) in config.values() {
             if n == val {
-                return config.set(config.name(), v)
+                return config.set(config.name(), v);
             }
         }
 
         return Err(RedisError::String(format!(
             "Unknow configration value '{}', options are {:?}.",
-            val, values.iter().map(|(k,_v)| *k).collect::<Vec<&str>>()
+            val,
+            values.iter().map(|(k, _v)| *k).collect::<Vec<&str>>()
         )));
     }
 
@@ -390,7 +391,12 @@ impl Config {
             x if x == self.lock_regis_timeout.name() => {
                 Self::set_numeric_value(&mut self.lock_regis_timeout, val)
             }
-            _ => return Err(RedisError::String(format!("No such configuration {}", name))),
+            _ => {
+                return Err(RedisError::String(format!(
+                    "No such configuration {}",
+                    name
+                )))
+            }
         }
     }
 
@@ -415,7 +421,12 @@ impl Config {
             x if x == self.lock_regis_timeout.name() => {
                 Self::is_emmutable(&mut self.lock_regis_timeout)
             }
-            _ => return Err(RedisError::String(format!("No such configuration {}", name))),
+            _ => {
+                return Err(RedisError::String(format!(
+                    "No such configuration {}",
+                    name
+                )))
+            }
         } {
             return Err(RedisError::String(format!(
                 "Configuration {} can not be changed at runtime",
@@ -435,7 +446,10 @@ impl Config {
                 Ok(format!("{}", self.libraray_fatal_failure_policy))
             }
             x if x == self.lock_regis_timeout.name() => Ok(format!("{}", self.lock_regis_timeout)),
-            _ => Err(RedisError::String(format!("No such configuration {}", name))),
+            _ => Err(RedisError::String(format!(
+                "No such configuration {}",
+                name
+            ))),
         }
     }
 }
