@@ -183,3 +183,49 @@ And run it:
 ```
 
 Notice that RedisGears **only supports pure JS libraries**, a library that has a native code or use some native JS API provided by the browser or by nodejs **will not work**.
+
+## Easy Build and Deploy
+
+We can use npm scirts section to achieve an easy build and deploy commands, change the scripts section on `package.json` to the following:
+
+```json
+"scripts": {
+    "build": "npx webpack --config webpack.config.js",
+    "deploy": "echo \"Building\";npm run build;echo \"Deploying\";redis-cli -x RG.FUNCTION LOAD UPGRADE < ./dist/main.js"
+}
+```
+
+Now we can run `npm build` and `npm deploy` to build and deploy our library to a local Redis server.
+
+```bash
+npm run deploy
+
+> test@1.0.0 deploy
+> echo "Building";npm run build;echo "Deploying";redis-cli -x RG.FUNCTION LOAD UPGRADE < ./dist/main.js
+
+Building
+
+> test@1.0.0 build
+> npx webpack --config webpack.config.js
+
+asset main.js 71.7 KiB [compared for emit] [minimized] (name: main) 1 related asset
+orphan modules 1.88 MiB [orphan] 956 modules
+runtime modules 248 bytes 3 modules
+cacheable modules 1.4 MiB
+  modules by path ./node_modules/ 254 KiB
+    modules by path ./node_modules/seedrandom/ 26.5 KiB
+      modules by path ./node_modules/seedrandom/lib/*.js 16 KiB 6 modules
+      modules by path ./node_modules/seedrandom/*.js 10.5 KiB 2 modules
+    ./node_modules/decimal.js/decimal.js 133 KiB [built] [code generated]
+    ./node_modules/complex.js/complex.js 29.9 KiB [built] [code generated]
+    ./node_modules/fraction.js/fraction.js 20.2 KiB [built] [code generated]
+    ./node_modules/typed-function/typed-function.js 42.9 KiB [built] [code generated]
+    ./node_modules/javascript-natural-sort/naturalSort.js 2.05 KiB [built] [code generated]
+  ./src/index.js + 301 modules 1.15 MiB [built] [code generated]
+  crypto (ignored) 15 bytes [optional] [built] [code generated]
+webpack 5.73.0 compiled successfully in 3303 ms
+Deploying
+OK
+```
+
+You are welcome to come up with a new and nice ideas of impoving the development environment and share it with us.
