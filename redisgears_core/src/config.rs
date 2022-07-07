@@ -196,7 +196,7 @@ impl fmt::Display for LibraryOnFatalFailurePolicy {
 
 impl RedisConfigCtx for LibraryOnFatalFailurePolicy {
     fn name(&self) -> &'static str {
-        "library-fatal_failure-policy"
+        "library-fatal-failure-policy"
     }
 
     fn apply(&self, _ctx: &Context) -> Result<(), RedisError> {
