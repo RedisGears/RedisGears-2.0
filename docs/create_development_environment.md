@@ -195,7 +195,7 @@ We can use npm scripts section to achieve an easy build and deploy commands, cha
 }
 ```
 
-Now we can run `npm build` and `npm deploy` to build and deploy our library to a local Redis server.
+Now we can run `npm run build` and `npm run deploy` to build and deploy our library to a local Redis server.
 
 ```bash
 npm run deploy
