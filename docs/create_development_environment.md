@@ -186,7 +186,7 @@ Notice that RedisGears **only supports pure JS libraries**, a library that has a
 
 ## Easy Build and Deploy
 
-We can use npm scirts section to achieve an easy build and deploy commands, change the scripts section on `package.json` to the following:
+We can use npm scripts section to achieve an easy build and deploy commands, change the scripts section on `package.json` to the following:
 
 ```json
 "scripts": {
